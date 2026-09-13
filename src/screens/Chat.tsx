@@ -21,6 +21,10 @@ type Props = {
   messages: Msg[];
   status: string;
   connected: boolean;
+  /** The relay says the other phone is in the app. */
+  peerPresent: boolean;
+  /** When they were last in it, if this session saw them go. */
+  lastSeen: number | null;
   relayUp: boolean;
   keepHistory: boolean;
   /** False until a partner has actually connected at least once. */
@@ -63,6 +67,23 @@ type Props = {
  */
 const BREATHING_ROOM = 40;
 
+/**
+ * "last seen 12:30 AM", with the day added once it is no longer today.
+ *
+ * Built only from what this phone watched happen. The relay already tells each
+ * side when the other arrives and leaves — this is that, remembered. Nothing
+ * extra is sent to produce it and nothing is written down, so it lasts as long
+ * as the app is open and no longer.
+ */
+const seenAt = (ts: number): string => {
+  const then = new Date(ts);
+  const today = new Date().toDateString() === then.toDateString();
+  const time = then.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (today) return time;
+  const day = then.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  return `${day}, ${time}`;
+};
+
 const clock = (ts: number) =>
   new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
@@ -72,8 +93,11 @@ const size = (bytes: number) =>
 /** One glyph for where an outgoing message got to. */
 const tick = (d: Msg['delivery']) => {
   switch (d) {
-    case 'read':
-    case 'delivered': return '✓✓';
+    // Two ticks mean read, and nothing else. Delivered and waiting-on-the-relay
+    // are both one tick: from the sender's side they are the same fact — it has
+    // left, and nobody has looked at it yet.
+    case 'read': return '✓✓';
+    case 'delivered':
     case 'held': return '✓';
     case 'failed': return '!';
     default: return '·';
@@ -144,7 +168,7 @@ function StatusBubble({
 }
 
 export default function Chat({
-  messages, status, connected, relayUp, keepHistory, pairedOnce,
+  messages, status, connected, peerPresent, lastSeen, relayUp, keepHistory, pairedOnce,
   myStatuses, theirStatuses, sending,
   onSend, onAddTextStatus, onAddStatusMedia, onRemoveStatus, onWantStatusMedia,
   onLoadMyStatusMedia, onMarkSeen, onDeleteMessages, onClearChat,
@@ -324,7 +348,26 @@ export default function Chat({
     deletePrompt('Clear the whole conversation?', (forBoth) => onClearChat(forBoth));
 
   const selecting = selected.size > 0;
-  const dot = connected ? T.ok : relayUp ? T.accent : T.vaultInkSoft;
+  /**
+   * What the line at the top says, and what colour the dot is.
+   *
+   * The words follow the relay: it knows whether the other phone is in the app,
+   * and that does not flicker. The colour follows the direct connection, which
+   * does — green when the two phones are talking to each other, amber while
+   * everything is going by way of the relay. Both are true at once and neither
+   * is alarming, so only the dot moves.
+   *
+   * This used to key the words off the direct connection, so every time the
+   * channel blinked the chat announced that the other person had left.
+   */
+  const heading = peerPresent
+    ? 'online'
+    : lastSeen
+      ? `last seen ${seenAt(lastSeen)}`
+      : relayUp
+        ? 'They are away — messages will wait'
+        : status;
+  const dot = connected ? T.ok : peerPresent || relayUp ? T.accent : T.vaultInkSoft;
 
   return (
     <SafeAreaView style={s.wrap} edges={['top', 'left', 'right']}>
@@ -349,7 +392,7 @@ export default function Chat({
           <View style={s.statusCenter}>
             <View style={[s.dot, { backgroundColor: dot }]} />
             <Text style={s.status} numberOfLines={1}>
-              {connected ? 'Connected' : relayUp ? 'They are away — messages will wait' : status}
+              {heading}
             </Text>
           </View>
 

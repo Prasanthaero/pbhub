@@ -131,6 +131,15 @@ try {
   assert.equal(shown.b64, photoB64);
   ok('and it arrives byte for byte when they open the app');
 
+  // A partner whose socket has died but has not been noticed yet is deliberately
+  // not tested here. The relay now refuses to hand mail to a socket that is not
+  // OPEN, which closes a window of up to thirty seconds in which a message was
+  // handed to nobody and the sender heard nothing back. Over loopback that
+  // window barely exists — kill a client and the server sees the reset almost
+  // at once — so any test written for it would pass because the socket had
+  // already been removed, not because the new check did anything. A test that
+  // cannot fail for the right reason is worse than none.
+
   console.log('\nthe mailbox is not free storage');
   b3.s.close();
   await wait(400);

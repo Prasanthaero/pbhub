@@ -65,6 +65,31 @@ const peersOf = (ws) => {
   return [...room.clients].filter((c) => c !== ws);
 };
 
+/**
+ * Throw out sockets nobody is on, and say so.
+ *
+ * A phone that is force-stopped or loses signal does not always send a close
+ * frame, so its socket sits in the room looking present until a ping fails —
+ * up to thirty seconds later. For that whole window the other person is told
+ * their partner is online when they are not, and the chat says "online" over an
+ * empty room. Checking whenever anything happens in the room makes the answer
+ * honest within a moment instead.
+ *
+ * Returns whether anything was removed.
+ */
+function reap(room) {
+  const dead = [...room.clients].filter((c) => c.readyState !== c.OPEN);
+  if (!dead.length) return false;
+  dead.forEach((c) => {
+    room.clients.delete(c);
+    try {
+      c.terminate();
+    } catch {}
+  });
+  room.clients.forEach((p) => send(p, { t: 'peer', present: false }));
+  return true;
+}
+
 /** Hand over everything waiting for this peer, oldest first. */
 function deliverMail(ws) {
   const room = rooms.get(ws.roomId);
@@ -179,8 +204,18 @@ wss.on('connection', (ws) => {
       const room = rooms.get(ws.roomId);
       if (!room) return;
 
+      // Anything of theirs that has quietly died goes now, so the mail below
+      // is decided on who is really there and the other phone is told at once.
+      reap(room);
+
       const target = otherRole(ws.role);
-      const live = [...room.clients].find((c) => c.role === target);
+      // Open, not merely present. A socket whose owner has gone is still in the
+      // room until the next sweep notices — up to thirty seconds — and handing
+      // a message to it looked like delivery and was not. The sender got no
+      // acknowledgement of any kind and its message sat at one dot until
+      // something else happened to flush the outbox. Held is the honest answer
+      // for a partner whose connection is already dead.
+      const live = [...room.clients].find((c) => c.role === target && c.readyState === c.OPEN);
 
       // Partner is here: hand it over and let them acknowledge directly.
       if (live) {
@@ -232,6 +267,8 @@ const sweep = setInterval(() => {
     ws.isAlive = false;
     ws.ping();
   });
+
+  rooms.forEach((room) => reap(room));
 
   rooms.forEach((room, id) => {
     for (const role of ['a', 'b']) {

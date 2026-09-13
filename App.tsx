@@ -73,6 +73,27 @@ export default function App() {
 
   const [status, setStatus] = useState('Offline');
   const [connected, setConnected] = useState(false);
+  /**
+   * Whether the relay says the other phone is in the app.
+   *
+   * Deliberately separate from `connected`, which means a direct WebRTC channel
+   * is open. The two are not the same thing, and treating them as one was a
+   * bug: the channel closes and reopens on its own — a renegotiation, an ICE
+   * hiccup, the end of a call — and the chat announced "they are away" every
+   * time, with both people sitting in the app looking at each other. Presence
+   * comes from the relay, which knows, and does not flicker.
+   */
+  const [peerPresent, setPeerPresent] = useState(false);
+  /**
+   * When they were last in the app, as far as this phone saw.
+   *
+   * Noted locally the moment the relay says they have gone. Nothing extra is
+   * sent or stored anywhere to produce it — the relay already tells both phones
+   * when the other arrives and leaves, and this is only that, remembered. It
+   * lasts as long as the app is open; after that there is nothing to show and
+   * the chat says only that they are away.
+   */
+  const [lastSeen, setLastSeen] = useState<number | null>(null);
   const [relayUp, setRelayUp] = useState(false);
 
   const [myStatuses, setMyStatuses] = useState<StatusItem[]>([]);
@@ -219,6 +240,8 @@ export default function App() {
     setRemoteStream(null);
     setCall(null);
     setConnected(false);
+    setPeerPresent(false);
+    setLastSeen(null);
     setRelayUp(false);
     setSending(null);
     setShared(null);
@@ -523,9 +546,15 @@ export default function App() {
         flushOutbox();
       },
       onPeerPresent: (present) => {
+        setPeerPresent(present);
+        if (!present) setLastSeen(Date.now());
         if (present) {
           if (!peerRef.current) buildPeer(keys, cfg, roleRef.current);
           peerRef.current?.start();
+          // They have just walked in. Anything of ours still unacknowledged goes
+          // out again now rather than waiting for a direct channel to open —
+          // there may never be one, and the relay will carry it either way.
+          flushOutbox();
         } else {
           setConnected(false);
           setTheirStatuses([]);
@@ -541,6 +570,7 @@ export default function App() {
       onClosed: (reason) => {
         setStatus(reason);
         setConnected(false);
+        setPeerPresent(false);
         setRelayUp(false);
       },
       onMail: (id, wire, at) => {
@@ -991,8 +1021,18 @@ export default function App() {
     const fresh = ids.filter((id) => !reportedSeen.current.has(id));
     if (!fresh.length) return;
     fresh.forEach((id) => reportedSeen.current.add(id));
-    peerRef.current?.send({ k: 'read', ids: fresh });
-  }, []);
+
+    // Both roads, like everything else. This used to go only over the direct
+    // WebRTC channel, so whenever there was not one — which is most of the time
+    // on mobile data, and always in a build without WebRTC — the receipt simply
+    // never left, and the sender's ticks never went green however carefully
+    // their message had been read.
+    if (peerRef.current?.send({ k: 'read', ids: fresh })) return;
+    const wire = wrap({ k: 'read', ids: fresh });
+    // Held for them if they have gone by now, which is the right answer: they
+    // find out their message was read the next time they open the app.
+    if (wire) sigRef.current?.mail(`read-${fresh[0]}`, wire);
+  }, [wrap]);
 
   // ---- deleting ----------------------------------------------------------
   /**
@@ -1184,6 +1224,8 @@ export default function App() {
           messages={messages}
           status={status}
           connected={connected}
+          peerPresent={peerPresent}
+          lastSeen={lastSeen}
           relayUp={relayUp}
           keepHistory={settings.keepHistory}
           pairedOnce={settings.pairedOnce}
