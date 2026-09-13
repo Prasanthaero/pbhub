@@ -167,7 +167,10 @@ export default function VaultSettingsScreen({
         <View style={s.rowItem}>
           <View style={{ flex: 1, paddingRight: 12 }}>
             <Text style={s.rowTitle}>Lock when the app leaves the screen</Text>
-            <Text style={s.rowSub}>Switching apps wipes the conversation and drops the keys.</Text>
+            <Text style={s.rowSub}>
+              Switching apps wipes the conversation and drops the keys. A call in progress is the
+              exception — the screen going dark at your ear would otherwise hang up on you.
+            </Text>
           </View>
           <Switch value={panic} onValueChange={setPanic} />
         </View>

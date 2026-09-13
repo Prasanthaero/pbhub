@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, View, StyleSheet, Alert, Platform, UIManager } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as ScreenCapture from 'expo-screen-capture';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import type { MediaStream } from 'react-native-webrtc';
 
 import { T } from './src/theme';
@@ -133,6 +134,33 @@ export default function App() {
     }
   }, []);
 
+  /**
+   * Hold the screen on while a call is up.
+   *
+   * Android dims and then sleeps a screen nobody has touched, and a video call
+   * is exactly that — you are looking at it, not tapping it. Letting it sleep
+   * used to end the call outright; that is separately fixed in the lock, but
+   * the screen going dark in the middle of a video call is wrong on its own.
+   *
+   * Released the moment the call ends, so the phone goes back to its normal
+   * habits rather than sitting awake for the rest of the day.
+   */
+  useEffect(() => {
+    if (!call) return;
+    let dropped = false;
+    activateKeepAwakeAsync('call').catch(() => {});
+    return () => {
+      if (dropped) return;
+      dropped = true;
+      try {
+        deactivateKeepAwake('call');
+      } catch {
+        // Nothing to do about a wake lock that will not release; Android drops
+        // it with the process anyway.
+      }
+    };
+  }, [call]);
+
   const pushSystem = useCallback((body: string) => {
     setMessages((m) => [...m, mkMsg('system', body)]);
   }, []);
@@ -229,6 +257,15 @@ export default function App() {
         return;
       }
       if (s !== 'background' || !unlocked || !settings.panicOnBackground) return;
+
+      // A call in progress is not walking away.
+      //
+      // Reported as the call cutting out and dumping you back on the notes
+      // page. The screen going dark during a call — a timeout, the proximity
+      // sensor when the phone is at your ear — backgrounds the activity exactly
+      // like pressing home does, and locking tore down the peer connection
+      // mid-sentence. No calling app hangs up because the screen went off.
+      if (callRef.current) return;
 
       // The gallery and the camera are separate activities, so choosing a photo
       // backgrounds this app exactly like walking away does. Locking there
