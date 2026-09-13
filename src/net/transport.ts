@@ -31,6 +31,9 @@ export const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
 export type Envelope =
   | { k: 'msg'; id: string; body: string; at: number }
   | { k: 'ack'; id: string }
+  /** "I have these on screen." Sent only when the chat is actually open, and
+   *  only if read receipts are switched on. */
+  | { k: 'read'; ids: string[] }
   | { k: 'call'; action: 'ring' | 'accept' | 'decline' | 'hangup'; callKind?: 'audio' | 'video' }
   /**
    * The list of statuses, without any of the bytes.

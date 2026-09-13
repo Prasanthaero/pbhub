@@ -54,6 +54,24 @@ export type VaultSettings = {
    * Until this has been true once, the app says so plainly.
    */
   pairedOnce: boolean;
+  /**
+   * Tell them when their messages have been seen.
+   *
+   * On by default because that is what people expect of a chat, but it is a
+   * switch: a read receipt says when you picked up your phone, which is a
+   * little more than "delivered" and not everyone wants to send it. Turning it
+   * off stops sending them; it does not stop receiving theirs.
+   */
+  sendReadReceipts: boolean;
+  /**
+   * A dot in the status bar when a message arrives while you are elsewhere.
+   *
+   * No banner, no preview, no sound — see net/notify.ts. It also only works
+   * while the app is still alive in the background, which means it cannot be
+   * combined with locking on background: that closes the connection, so there
+   * is nothing left to be notified about.
+   */
+  quietNotifications: boolean;
 };
 
 export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
@@ -63,6 +81,8 @@ export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
   blockScreenshots: true,
   keepHistory: false,
   pairedOnce: false,
+  sendReadReceipts: true,
+  quietNotifications: false,
 });
 
 export async function readMarker(): Promise<VaultBlob | null> {

@@ -25,6 +25,7 @@ export type Delivery =
   | 'sending'   // handed to the transport, no word back yet
   | 'held'      // the relay is holding it until they open the app
   | 'delivered' // their phone acknowledged it
+  | 'read'      // and they had the chat open, so they have seen it
   | 'failed';   // the relay's mailbox is full, or it expired unread
 
 export type Msg = {

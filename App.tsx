@@ -25,6 +25,7 @@ import {
 import { Signaling, type Role } from './src/net/signaling';
 import { Peer, type CallKind } from './src/net/peer';
 import type { Envelope } from './src/net/transport';
+import { prepareNotifications, showDot, clearDot } from './src/net/notify';
 import { pickPhoto, pickVideo, readRecording, TooLarge } from './src/media/pick';
 import {
   readSharedFile, toStatusImage, kindForMime, type SharedItem,
@@ -134,6 +135,7 @@ export default function App() {
     keysRef.current = null;
     outboxRef.current = [];
     seenRef.current = new Set();
+    reportedSeen.current = new Set();
     setMessages([]);
     setLocalStream(null);
     setRemoteStream(null);
@@ -146,6 +148,7 @@ export default function App() {
     setMyStatuses([]);
     setTheirStatuses([]);
     setStatus('Offline');
+    clearDot();
     setUnlocked(false);
     setActive(null);
     setScreen('list');
@@ -157,8 +160,12 @@ export default function App() {
   // 'inactive' while a permission dialog is on screen, and locking the vault the
   // instant someone taps Allow on the microphone prompt would make calls
   // impossible to answer.
+  const foreground = useRef(true);
+
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
+      foreground.current = s === 'active';
+      if (s === 'active') clearDot();
       if (s === 'background' && unlocked && settings.panicOnBackground) lock();
     });
     return () => sub.remove();
@@ -190,6 +197,7 @@ export default function App() {
           persistHistory(next);
           return next;
         });
+        if (!foreground.current && settingsRef.current.quietNotifications) showDot();
         // Receipt travels whichever road is open.
         if (!peerRef.current?.send({ k: 'ack', id: e.id })) sigRef.current?.ack(e.id);
         return;
@@ -197,7 +205,16 @@ export default function App() {
       case 'ack': {
         outboxRef.current = outboxRef.current.filter((p) => p.id !== e.id);
         persistOutbox();
-        markDelivered(e.id, 'delivered');
+        // Never walk a message backwards: an ack arriving after a read receipt
+        // must not turn "seen" back into "delivered".
+        setMessages((m) => m.map((x) => (
+          x.id === e.id && x.delivery !== 'read' ? { ...x, delivery: 'delivered' } : x
+        )));
+        return;
+      }
+      case 'read': {
+        const seen = new Set(e.ids);
+        setMessages((m) => m.map((x) => (seen.has(x.id) ? { ...x, delivery: 'read' } : x)));
         return;
       }
       case 'status-list':
@@ -408,6 +425,8 @@ export default function App() {
     setMessages(history);
     setMyStatuses(mine);
     myStatusesRef.current = mine;
+
+    if (cfg.quietNotifications) prepareNotifications();
 
     setUnlocked(true);
     setScreen('chat');
@@ -733,6 +752,24 @@ export default function App() {
     return true;
   }, []);
 
+  /**
+   * Tell them we have their messages on screen.
+   *
+   * "Seen" here means exactly what it says: the chat was open and the message
+   * was in it. There is no background delivery in this app, so there is no way
+   * to be told something arrived without also being present to read it — which
+   * makes this a more honest signal than it is in most chat apps.
+   */
+  const reportedSeen = useRef<Set<string>>(new Set());
+
+  const markSeen = useCallback((ids: string[]) => {
+    if (!settingsRef.current.sendReadReceipts) return;
+    const fresh = ids.filter((id) => !reportedSeen.current.has(id));
+    if (!fresh.length) return;
+    fresh.forEach((id) => reportedSeen.current.add(id));
+    peerRef.current?.send({ k: 'read', ids: fresh });
+  }, []);
+
   // ---- deleting ----------------------------------------------------------
   /**
    * Remove messages from this phone, and optionally from theirs.
@@ -837,11 +874,16 @@ export default function App() {
           settings={settings}
           roomId={keysRef.current.roomId}
           pairingPhrase={bytesToWords(keysRef.current.pairing)}
-          onSave={async (next) => {
+          onSave={async (incoming) => {
+            let next = incoming;
             const keys = keysRef.current;
             const wasKeeping = settingsRef.current.keepHistory;
             setSettings(next);
             settingsRef.current = next;
+            if (next.quietNotifications && !settingsRef.current.quietNotifications) {
+              const allowed = await prepareNotifications();
+              if (!allowed) next = { ...next, quietNotifications: false };
+            }
             if (keys) await writeSettings(keys.msgKey, next);
 
             // Turning history off takes the existing log with it — otherwise
@@ -906,6 +948,7 @@ export default function App() {
           onRemoveStatus={removeStatus}
           onWantStatusMedia={wantStatusMedia}
           onLoadMyStatusMedia={loadMyStatusMedia}
+          onMarkSeen={markSeen}
           onDeleteMessages={deleteMessages}
           onClearChat={clearChat}
           onPickPhoto={(camera) => shipMedia('photo', () => pickPhoto(camera))}

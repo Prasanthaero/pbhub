@@ -33,6 +33,9 @@ export default function VaultSettingsScreen({
   const [panic, setPanic] = useState(settings.panicOnBackground);
   const [block, setBlock] = useState(settings.blockScreenshots);
   const [keep, setKeep] = useState(settings.keepHistory);
+  const [receipts, setReceipts] = useState(settings.sendReadReceipts);
+  const [advanced, setAdvanced] = useState(false);
+  const [quiet, setQuiet] = useState(settings.quietNotifications);
   const [err, setErr] = useState('');
 
   const savePin = async () => {
@@ -61,6 +64,8 @@ export default function VaultSettingsScreen({
       panicOnBackground: panic,
       blockScreenshots: block,
       keepHistory: keep,
+      sendReadReceipts: receipts,
+      quietNotifications: quiet,
       // Not a user setting — it records that the two phones have actually met,
       // so saving other settings must not quietly reset it.
       pairedOnce: settings.pairedOnce,
@@ -104,41 +109,6 @@ export default function VaultSettingsScreen({
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
-        <Text style={s.section}>Rendezvous</Text>
-        <Text style={s.help}>
-          The relay only introduces the two phones to each other. It receives a hash and a blob of
-          ciphertext, keeps nothing, and drops out once the call is up. Point it at your own server
-          if you would rather not trust ours.
-        </Text>
-        <TextInput
-          style={s.input}
-          value={relayUrl}
-          onChangeText={setRelayUrl}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder={RELAY_EXAMPLE}
-          placeholderTextColor={T.vaultInkSoft}
-        />
-
-        <Text style={s.section}>ICE servers</Text>
-        <Text style={s.help}>
-          STUN lets the phones find a direct path. A public STUN server learns your IP address —
-          self-host coturn if that matters to you. Add a TURN entry here if a strict mobile network
-          blocks the direct path.
-        </Text>
-        <TextInput
-          style={[s.input, { height: 130, fontFamily: 'monospace', fontSize: 12 }]}
-          value={ice}
-          onChangeText={setIce}
-          multiline
-          autoCapitalize="none"
-          autoCorrect={false}
-          textAlignVertical="top"
-        />
-        <TouchableOpacity onPress={() => setIce(JSON.stringify(DEFAULT_ICE, null, 2))}>
-          <Text style={s.link}>Reset to default</Text>
-        </TouchableOpacity>
-
         <Text style={s.section}>The conversation</Text>
         <View style={s.rowItem}>
           <View style={{ flex: 1, paddingRight: 12 }}>
@@ -158,6 +128,18 @@ export default function VaultSettingsScreen({
           wait anywhere — you both have to be here for those.
         </Text>
 
+        <View style={s.rowItem}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={s.rowTitle}>Tell them when you have read it</Text>
+            <Text style={s.rowSub}>
+              Their two ticks turn green once their message is on your screen. A read receipt says
+              when you picked up your phone, which is a little more than "delivered" — turn it off
+              and you still see theirs, they just stop seeing yours.
+            </Text>
+          </View>
+          <Switch value={receipts} onValueChange={setReceipts} />
+        </View>
+
         <Text style={s.section}>Safety</Text>
         <View style={s.rowItem}>
           <View style={{ flex: 1, paddingRight: 12 }}>
@@ -166,6 +148,20 @@ export default function VaultSettingsScreen({
           </View>
           <Switch value={panic} onValueChange={setPanic} />
         </View>
+        <View style={s.rowItem}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={s.rowTitle}>A dot when a message arrives</Text>
+            <Text style={s.rowSub}>
+              A small dot in the status bar and nothing else — no banner, no name, no preview, no
+              sound. Open the app to see what it was.
+              {panic
+                ? ' It cannot work while "lock when the app leaves the screen" is on, because that closes the connection.'
+                : ' It only works while the app is still in the background; once Android closes it, nothing arrives.'}
+            </Text>
+          </View>
+          <Switch value={quiet && !panic} onValueChange={setQuiet} disabled={panic} />
+        </View>
+
         <View style={s.rowItem}>
           <View style={{ flex: 1, paddingRight: 12 }}>
             <Text style={s.rowTitle}>Block screenshots</Text>
@@ -264,6 +260,55 @@ export default function VaultSettingsScreen({
 
         {!!err && <Text style={s.err}>{err}</Text>}
 
+        <TouchableOpacity style={s.advancedToggle} onPress={() => setAdvanced(!advanced)}>
+          <Text style={s.advancedText}>
+            {advanced ? 'Hide the technical settings' : 'Technical settings'}
+          </Text>
+          <Text style={s.advancedChevron}>{advanced ? '▲' : '▼'}</Text>
+        </TouchableOpacity>
+        {advanced && (
+          <>
+            <Text style={s.help}>
+              You set these up once and then forget them. Nothing here needs changing unless the
+              two phones stop finding each other.
+            </Text>
+        <Text style={s.section}>Rendezvous</Text>
+        <Text style={s.help}>
+          The relay only introduces the two phones to each other. It receives a hash and a blob of
+          ciphertext, keeps nothing, and drops out once the call is up. Point it at your own server
+          if you would rather not trust ours.
+        </Text>
+        <TextInput
+          style={s.input}
+          value={relayUrl}
+          onChangeText={setRelayUrl}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder={RELAY_EXAMPLE}
+          placeholderTextColor={T.vaultInkSoft}
+        />
+
+        <Text style={s.section}>ICE servers</Text>
+        <Text style={s.help}>
+          STUN lets the phones find a direct path. A public STUN server learns your IP address —
+          self-host coturn if that matters to you. Add a TURN entry here if a strict mobile network
+          blocks the direct path.
+        </Text>
+        <TextInput
+          style={[s.input, { height: 130, fontFamily: 'monospace', fontSize: 12 }]}
+          value={ice}
+          onChangeText={setIce}
+          multiline
+          autoCapitalize="none"
+          autoCorrect={false}
+          textAlignVertical="top"
+        />
+        <TouchableOpacity onPress={() => setIce(JSON.stringify(DEFAULT_ICE, null, 2))}>
+          <Text style={s.link}>Reset to default</Text>
+        </TouchableOpacity>
+          </>
+        )}
+
         <TouchableOpacity style={s.destroy} onPress={confirmDestroy}>
           <Text style={s.destroyText}>Destroy vault on this phone</Text>
         </TouchableOpacity>
@@ -287,6 +332,13 @@ const s = StyleSheet.create({
   },
   link: { color: T.mine, fontSize: 13, marginTop: 8 },
   pinMsg: { color: T.accent, fontSize: 13, marginTop: 10 },
+  advancedToggle: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 34, paddingVertical: 14,
+    borderTopWidth: 1, borderTopColor: T.vaultLine,
+  },
+  advancedText: { color: T.vaultInkSoft, fontSize: 14, fontWeight: '600' },
+  advancedChevron: { color: T.vaultInkSoft, fontSize: 11 },
   rowItem: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: T.vaultLine,

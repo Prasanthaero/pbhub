@@ -34,6 +34,8 @@ type Props = {
   onWantStatusMedia: (id: string) => void;
   /** Read one of ours back off disk, for looking at it again. */
   onLoadMyStatusMedia: (id: string) => void;
+  /** Report which of their messages are on screen. */
+  onMarkSeen: (ids: string[]) => void;
   onDeleteMessages: (ids: string[], forBoth: boolean) => void;
   onClearChat: (forBoth: boolean) => void;
   onPickPhoto: (fromCamera: boolean) => void;
@@ -53,12 +55,18 @@ const size = (bytes: number) =>
 /** One glyph for where an outgoing message got to. */
 const tick = (d: Msg['delivery']) => {
   switch (d) {
+    case 'read':
     case 'delivered': return '✓✓';
     case 'held': return '✓';
     case 'failed': return '!';
     default: return '·';
   }
 };
+
+/** Read is the same two ticks, in green. Colour carries the difference so the
+ *  glyph does not have to grow a third form nobody would recognise. */
+const tickColour = (d: Msg['delivery']) =>
+  d === 'read' ? T.ok : d === 'failed' ? T.danger : 'rgba(255,255,255,0.75)';
 
 function VideoBubble({ uri, style }: { uri: string; style?: any }) {
   const player = useVideoPlayer(uri, (p) => { p.loop = false; });
@@ -122,7 +130,7 @@ export default function Chat({
   messages, status, connected, relayUp, keepHistory, pairedOnce,
   myStatuses, theirStatuses, sending,
   onSend, onAddTextStatus, onAddStatusMedia, onRemoveStatus, onWantStatusMedia,
-  onLoadMyStatusMedia, onDeleteMessages, onClearChat,
+  onLoadMyStatusMedia, onMarkSeen, onDeleteMessages, onClearChat,
   onPickPhoto, onPickVideo, onSendRecording, onCall, onLock, onSettings,
 }: Props) {
   const [draft, setDraft] = useState('');
@@ -162,6 +170,14 @@ export default function Chat({
     if (story?.mine) onLoadMyStatusMedia(storyItem.id);
     else onWantStatusMedia(storyItem.id);
   }, [storyItem, story?.mine, onLoadMyStatusMedia, onWantStatusMedia]);
+
+  // Their messages are on screen the moment this list renders them — there is
+  // no background delivery here, so being sent one and reading it are the same
+  // moment. Reported once per id; the parent keeps the record.
+  useEffect(() => {
+    const ids = messages.filter((x) => x.kind === 'in').map((x) => x.id);
+    if (ids.length) onMarkSeen(ids);
+  }, [messages, onMarkSeen]);
 
   const send = () => {
     const t = draft.trim();
@@ -390,7 +406,11 @@ export default function Chat({
                   <View style={s.meta}>
                     {!!m && <Text style={s.metaSize}>{size(m.bytes)}</Text>}
                     <Text style={s.time}>{clock(item.at)}</Text>
-                    {isMine && <Text style={s.tick}>{tick(item.delivery)}</Text>}
+                    {isMine && (
+                      <Text style={[s.tick, { color: tickColour(item.delivery) }]}>
+                        {tick(item.delivery)}
+                      </Text>
+                    )}
                   </View>
 
                   {isMine && item.progress !== undefined && (
