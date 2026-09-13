@@ -52,7 +52,6 @@ export default function App() {
   // ---- cover story -------------------------------------------------------
   const [notes, setNotes] = useState<Note[]>([]);
   const [active, setActive] = useState<Note | null>(null);
-  const [activeIsNew, setActiveIsNew] = useState(false);
   const [screen, setScreen] = useState<Screen>('list');
   const [hasVault, setHasVault] = useState(false);
 
@@ -161,12 +160,30 @@ export default function App() {
   // instant someone taps Allow on the microphone prompt would make calls
   // impossible to answer.
   const foreground = useRef(true);
+  /** Set while a picker, camera or share sheet we launched is on screen. */
+  const leavingOnPurpose = useRef(false);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
       foreground.current = s === 'active';
-      if (s === 'active') clearDot();
-      if (s === 'background' && unlocked && settings.panicOnBackground) lock();
+      if (s === 'active') {
+        clearDot();
+        // Back from the picker or the camera; arm the lock again.
+        leavingOnPurpose.current = false;
+        return;
+      }
+      if (s !== 'background' || !unlocked || !settings.panicOnBackground) return;
+
+      // The gallery and the camera are separate activities, so choosing a photo
+      // backgrounds this app exactly like walking away does. Locking there
+      // closed the vault mid-action and threw the user back to the notes list —
+      // reported as "if I add any media it comes out", and it was.
+      //
+      // Anything the user deliberately left for, and will be returned from, sets
+      // this first. Everything else — the home button, the recents switcher, a
+      // call arriving — still locks.
+      if (leavingOnPurpose.current) return;
+      lock();
     });
     return () => sub.remove();
   }, [unlocked, settings.panicOnBackground, lock]);
@@ -534,6 +551,7 @@ export default function App() {
 
     let picked;
     try {
+      leavingOnPurpose.current = true;
       picked = await get();
     } catch (err) {
       Alert.alert(
@@ -543,6 +561,8 @@ export default function App() {
           : 'Something went wrong getting that file.',
       );
       return;
+    } finally {
+      leavingOnPurpose.current = false;
     }
     if (!picked) return;
 
@@ -646,6 +666,7 @@ export default function App() {
 
   const pickStatusMedia = useCallback(async (kind: 'photo' | 'video') => {
     try {
+      leavingOnPurpose.current = true;
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) return;
       const res = await ImagePicker.launchImageLibraryAsync({
@@ -677,6 +698,8 @@ export default function App() {
       });
     } catch {
       Alert.alert('Could not use that', 'Something went wrong reading the file.');
+    } finally {
+      leavingOnPurpose.current = false;
     }
   }, [addStatus]);
 
@@ -965,8 +988,6 @@ export default function App() {
       return (
         <NoteEditor
           note={active}
-          isNew={activeIsNew}
-          tryUnlock={tryUnlock}
           onSave={onSaveNote}
           onDelete={onDeleteNote}
           onCancel={() => {
@@ -983,12 +1004,10 @@ export default function App() {
         showSetupHint={!hasVault}
         onOpen={(n) => {
           setActive(n);
-          setActiveIsNew(false);
           setScreen('editor');
         }}
         onNew={() => {
           setActive(newNote());
-          setActiveIsNew(true);
           setScreen('editor');
         }}
         onSecretGesture={() => setScreen('gate')}

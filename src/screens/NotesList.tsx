@@ -62,18 +62,27 @@ export default function NotesList({
           showSetupHint ? (
             <TouchableOpacity style={s.hint} onPress={onSecretGesture} activeOpacity={0.7}>
               <Text style={s.hintText}>
-                Press and hold the word <Text style={s.hintStrong}>Notes</Text> above to set up.
+                Press and hold the <Text style={s.hintStrong}>+</Text> button to set up.
               </Text>
               <Text style={s.hintSub}>
-                This only appears until you have. Afterwards the hold is the only way in, and
-                nothing on this screen mentions it.
+                Tap it for a note, hold it to get in. This only appears until you have set up;
+                afterwards nothing on this screen mentions the hold.
               </Text>
             </TouchableOpacity>
           ) : null
         }
       />
 
-      <TouchableOpacity style={s.fab} onPress={onNew} activeOpacity={0.85}>
+      {/* Tap for a note. Hold for the way in.
+          Nobody long-presses a plus button by accident, and unlike typing a
+          PIN into a note it either works or tells you why. */}
+      <TouchableOpacity
+        style={s.fab}
+        onPress={onNew}
+        onLongPress={onSecretGesture}
+        delayLongPress={700}
+        activeOpacity={0.85}
+      >
         <Text style={s.fabText}>+</Text>
       </TouchableOpacity>
     </SafeAreaView>

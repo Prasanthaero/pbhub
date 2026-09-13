@@ -147,6 +147,9 @@ export default function Chat({
   /** Messages picked out for deletion. Empty means normal mode. */
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  /** Hide the status row while the keyboard is up, so the chat keeps the room. */
+  const [typing, setTyping] = useState(false);
+
   const listRef = useRef<FlatList<Msg>>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recStarted = useRef(0);
@@ -302,7 +305,10 @@ export default function Chat({
         </View>
       )}
 
-      {/* Status row: yours first, then theirs, newest to oldest. */}
+      {/* Status row: yours first, then theirs, newest to oldest.
+          Hidden while typing — on a small screen it and the keyboard together
+          leave almost nothing for the conversation. */}
+      {!typing && (
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -333,8 +339,9 @@ export default function Chat({
           <Text style={s.noStatus}>No status from them</Text>
         )}
       </ScrollView>
+      )}
 
-      {!pairedOnce && (
+      {!pairedOnce && !typing && (
         <View style={s.notPaired}>
           <Text style={s.notPairedTitle}>Not paired yet</Text>
           <Text style={s.notPairedBody}>
@@ -346,10 +353,13 @@ export default function Chat({
         </View>
       )}
 
+      {/* On Android the window itself resizes (edge-to-edge is off), so this
+          must do nothing there; only iOS needs it to pad. Having both act at
+          once is what lifted the composer above the keyboard. */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={8}
+        enabled={Platform.OS === 'ios'}
       >
         <FlatList
           ref={listRef}
@@ -445,6 +455,8 @@ export default function Chat({
               style={s.input}
               value={draft}
               onChangeText={setDraft}
+              onFocus={() => setTyping(true)}
+              onBlur={() => setTyping(false)}
               placeholder={
                 connected ? 'Message'
                   : relayUp ? 'They will get it when they open the app'

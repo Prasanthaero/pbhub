@@ -52,7 +52,8 @@
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_CONNECT"
       ],
-      "allowBackup": false
+      "allowBackup": false,
+      "edgeToEdgeEnabled": false
     },
     "plugins": [
       "@config-plugins/react-native-webrtc",
