@@ -39,7 +39,7 @@ export const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
 export const MAX_OFFLINE_MEDIA_BYTES = 4 * 1024 * 1024;
 
 export type Envelope =
-  | { k: 'msg'; id: string; body: string; at: number }
+  | { k: 'msg'; id: string; body: string; at: number; /** Absolute ms when both phones drop it. */ exp?: number }
   | { k: 'ack'; id: string }
   /** "I have these on screen." Sent only when the chat is actually open, and
    *  only if read receipts are switched on. */
@@ -69,6 +69,10 @@ export type Envelope =
       /** Present when this transfer is a status being fetched, not a message.
        *  Without it the picture would land in the conversation. */
       statusId?: string;
+      /** Both phones drop it at this instant. */
+      exp?: number;
+      /** A photo the other side may look at exactly once. */
+      once?: boolean;
     }
   | { k: 'media-chunk'; id: string; seq: number; b64: string }
   | { k: 'media-end'; id: string }
@@ -90,6 +94,10 @@ export type Envelope =
       duration?: number;
       b64: string;
       at: number;
+      /** Both phones drop it at this instant. */
+      exp?: number;
+      /** A photo the other side may look at exactly once. */
+      once?: boolean;
     };
 
 /** Reassembles a media transfer as its chunks arrive. */
@@ -105,6 +113,10 @@ export class MediaAssembler {
     readonly chunks: number,
     readonly at: number,
     readonly duration?: number,
+    /** Absolute ms when both phones drop it. */
+    readonly exp?: number,
+    /** A photo the receiver may look at exactly once. */
+    readonly once?: boolean,
   ) {
     this.parts = new Array(chunks);
   }

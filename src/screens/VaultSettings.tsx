@@ -7,6 +7,7 @@ import { T } from '../theme';
 import { DEFAULT_ICE, RELAY_EXAMPLE, type VaultSettings } from '../store/vaultStore';
 import QRCode from 'react-native-qrcode-svg';
 import { encodePairing } from '../crypto/pairingCode';
+import { TTL_CHOICES } from '../store/messages';
 
 type Props = {
   settings: VaultSettings;
@@ -36,6 +37,7 @@ export default function VaultSettingsScreen({
   const [receipts, setReceipts] = useState(settings.sendReadReceipts);
   const [advanced, setAdvanced] = useState(false);
   const [quiet, setQuiet] = useState(settings.quietNotifications);
+  const [ttl, setTtl] = useState(settings.messageTtl);
   const [err, setErr] = useState('');
 
   const savePin = async () => {
@@ -66,6 +68,7 @@ export default function VaultSettingsScreen({
       keepHistory: keep,
       sendReadReceipts: receipts,
       quietNotifications: quiet,
+      messageTtl: ttl,
       // Neither of these is a user setting: one records that the two phones
       // have actually met, the other identifies this install to the relay.
       // Saving other settings must not quietly reset either.
@@ -129,6 +132,24 @@ export default function VaultSettingsScreen({
           ciphertext it cannot read, and are handed over the moment they open the app, then deleted.
           Long videos are the exception — you both have to be here for those.
         </Text>
+
+        <Text style={s.rowTitle}>Messages disappear after</Text>
+        <Text style={s.rowSub}>
+          Whatever you pick here goes out attached to each message you send, so both phones drop it
+          at the same moment — it does not matter what they have chosen. Messages they send follow
+          their setting. Off means the conversation lasts as long as the app is open.
+        </Text>
+        <View style={s.chips}>
+          {TTL_CHOICES.map((c) => (
+            <TouchableOpacity
+              key={c.label}
+              style={[s.chip, ttl === c.ms && s.chipOn]}
+              onPress={() => setTtl(c.ms)}
+            >
+              <Text style={[s.chipText, ttl === c.ms && s.chipTextOn]}>{c.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
         <View style={s.rowItem}>
           <View style={{ flex: 1, paddingRight: 12 }}>
@@ -320,6 +341,14 @@ export default function VaultSettingsScreen({
 }
 
 const s = StyleSheet.create({
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12, marginBottom: 18 },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18,
+    borderWidth: 1, borderColor: T.vaultLine, backgroundColor: T.vaultCard,
+  },
+  chipOn: { backgroundColor: T.mine, borderColor: T.mine },
+  chipText: { color: T.vaultInkSoft, fontSize: 14 },
+  chipTextOn: { color: '#fff', fontWeight: '600' },
   wrap: { flex: 1, backgroundColor: T.vaultBg },
   bar: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',

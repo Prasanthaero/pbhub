@@ -265,5 +265,38 @@ ok('too short or not a number at all is refused');
 assert.equal(hex(pairingFromNumbers(A, B)), hex(pairingFromNumbers(A, B)));
 ok('the same two numbers always give the same secret — no randomness, by design');
 
+// ---------------------------------------------------------------------------
+// Disappearing messages. The sweep runs every thirty seconds over the whole
+// conversation, so it must not allocate a new array when nothing has expired —
+// that would re-render the chat and rewrite the history file twice a minute.
+// ---------------------------------------------------------------------------
+const { dropExpired, TTL_CHOICES, ttlLabel } = await import('../src/store/messages.ts');
+
+console.log('');
+console.log('messages that disappear');
+
+const now = 1_000_000;
+const convo = [
+  { id: 'a', kind: 'out', body: 'stays', at: now },
+  { id: 'b', kind: 'in', body: 'goes', at: now, expiresAt: now - 1 },
+  { id: 'c', kind: 'in', body: 'not yet', at: now, expiresAt: now + 1 },
+];
+
+assert.deepEqual(dropExpired(convo, now).map((m) => m.id), ['a', 'c']);
+ok('one past its moment goes; one without a moment and one still to come stay');
+
+const untouched = [convo[0], convo[2]];
+assert.equal(dropExpired(untouched, now), untouched);
+ok('nothing expired returns the same array, so the chat does not re-render');
+
+assert.equal(dropExpired(convo, now + 10).length, 1);
+ok('later still, the one with a moment has gone too');
+
+assert.equal(TTL_CHOICES[0].ms, 0);
+assert.equal(ttlLabel(0), 'Off');
+assert.equal(ttlLabel(24 * 60 * 60 * 1000), '1 day');
+assert.equal(ttlLabel(99), 'Off');
+ok('the timer choices read back as the labels shown in Settings');
+
 console.log(``);
 console.log(`${pass} checks passed`);

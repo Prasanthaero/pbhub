@@ -91,6 +91,14 @@ export type VaultSettings = {
    * encrypted, and only ever seen by a relay that already sees the room id.
    */
   deviceId: string;
+  /**
+   * How long a message lives before it disappears from both phones.
+   *
+   * Milliseconds; 0 means it stays for the session. The choice travels with
+   * each message rather than being applied at display time, so the two phones
+   * cannot disagree — see Expiring in store/messages.ts.
+   */
+  messageTtl: number;
 };
 
 export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
@@ -102,6 +110,7 @@ export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
   pairedOnce: false,
   sendReadReceipts: true,
   quietNotifications: false,
+  messageTtl: 0,
   deviceId: toHex(randomBytes(16)),
 });
 

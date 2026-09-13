@@ -6,7 +6,7 @@ import type { MediaStream } from 'react-native-webrtc';
 
 import { T } from './src/theme';
 import {
-  openVault, createVault, wipe, needsRestretch, type VaultKeys,
+  openVault, createVault, wipe, needsRestretch, seal, unseal, type VaultKeys,
 } from './src/crypto/vault';
 import { bytesToWords } from './src/crypto/wordlist';
 import {
@@ -14,7 +14,9 @@ import {
   defaultSettings, type VaultSettings,
 } from './src/store/vaultStore';
 import { loadNotes, saveNotes, newNote, type Note } from './src/store/notes';
-import { mkMsg, newId, type Msg, type MediaKind } from './src/store/messages';
+import {
+  mkMsg, newId, dropExpired, type Msg, type MediaKind,
+} from './src/store/messages';
 import { loadHistory, saveHistory, clearHistory } from './src/store/history';
 import { loadOutbox, saveOutbox, clearOutbox, type Pending } from './src/store/outbox';
 import {
@@ -107,6 +109,30 @@ export default function App() {
     readMarker().then((m) => setHasVault(!!m));
   }, []);
 
+  /**
+   * Seal and open envelopes without needing a peer connection.
+   *
+   * The Peer object has wrap/unwrap on it, which was fine while a peer always
+   * existed. It does not in a build without WebRTC — Expo Go — where there is
+   * never anything but the relay's mailbox, and the whole conversation goes
+   * through it. Routing the crypto through the vault key instead of through
+   * the peer means the mail path stands on its own.
+   */
+  const wrap = useCallback((e: Envelope): string | null => {
+    const keys = keysRef.current;
+    return keys ? seal(keys.msgKey, JSON.stringify(e)) : null;
+  }, []);
+
+  const unwrap = useCallback((wire: string): Envelope | null => {
+    const keys = keysRef.current;
+    if (!keys) return null;
+    try {
+      return JSON.parse(unseal(keys.msgKey, wire)) as Envelope;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const pushSystem = useCallback((body: string) => {
     setMessages((m) => [...m, mkMsg('system', body)]);
   }, []);
@@ -124,6 +150,29 @@ export default function App() {
     if (!keys) return;
     saveOutbox(keys.msgKey, outboxRef.current).catch(() => {});
   }, []);
+
+  /**
+   * Sweep away anything whose time is up.
+   *
+   * Every thirty seconds rather than a timer per message: a conversation can
+   * hold hundreds, and a scheduled callback for each is a lot of bookkeeping to
+   * be exactly on time about something the user cannot see to the second. The
+   * cost is that a message can linger up to half a minute past its moment.
+   *
+   * Runs while unlocked only. Locked, there is nothing on screen, and anything
+   * written down is re-filtered when it is loaded back.
+   */
+  useEffect(() => {
+    if (!unlocked) return;
+    const sweep = setInterval(() => {
+      setMessages((m) => {
+        const live = dropExpired(m);
+        if (live !== m) persistHistory(live);
+        return live;
+      });
+    }, 30_000);
+    return () => clearInterval(sweep);
+  }, [unlocked, persistHistory]);
 
   // ---- teardown ----------------------------------------------------------
   const lock = useCallback(() => {
@@ -164,6 +213,11 @@ export default function App() {
   const foreground = useRef(true);
   /** Set while a picker, camera or share sheet we launched is on screen. */
   const leavingOnPurpose = useRef(false);
+
+  /** Armed by the attach sheet, read when the picked photo comes back. A ref
+   *  and not state because the picker takes the app out of the foreground and
+   *  back, and this has to survive that without causing a re-render. */
+  const onceRef = useRef(false);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
@@ -212,7 +266,9 @@ export default function App() {
         if (seenRef.current.has(e.id)) return; // arrived twice; show it once
         seenRef.current.add(e.id);
         setMessages((m) => {
-          const next = [...m, { id: e.id, kind: 'in' as const, body: e.body, at: e.at || at }];
+          const next = [...m, {
+            id: e.id, kind: 'in' as const, body: e.body, at: e.at || at, expiresAt: e.exp,
+          }];
           persistHistory(next);
           return next;
         });
@@ -243,6 +299,7 @@ export default function App() {
           ...m,
           {
             id: e.id, kind: 'in', body: '', at: e.at || at,
+            expiresAt: e.exp, viewOnce: e.once,
             media: {
               kind: e.kind,
               uri: `data:${e.mime};base64,${e.b64}`,
@@ -310,15 +367,21 @@ export default function App() {
   const sendText = useCallback((body: string) => {
     const peer = peerRef.current;
     const sig = sigRef.current;
-    if (!peer) return;
 
     const id = newId();
     const at = Date.now();
-    // Sealed once; both roads carry the identical bytes.
-    const wire = peer.wrap({ k: 'msg', id, body, at });
+    const ttl = settingsRef.current.messageTtl;
+    const expiresAt = ttl > 0 ? at + ttl : undefined;
+    // Sealed once; both roads carry the identical bytes. The expiry travels
+    // with the message so both phones drop it at the same instant, whatever
+    // the other one has its own timer set to.
+    const wire = wrap({ k: 'msg', id, body, at, exp: expiresAt });
+    if (!wire) return;
 
     setMessages((m) => {
-      const next: Msg[] = [...m, { id, kind: 'out', body, at, delivery: 'sending' }];
+      const next: Msg[] = [
+        ...m, { id, kind: 'out', body, at, delivery: 'sending', expiresAt },
+      ];
       persistHistory(next);
       return next;
     });
@@ -327,8 +390,8 @@ export default function App() {
     persistOutbox();
 
     // Direct if we can, mailbox if we cannot, and the outbox covers neither.
-    if (!peer.sendWire(wire)) sig?.mail(id, wire);
-  }, [persistHistory, persistOutbox]);
+    if (!peer?.sendWire(wire)) sig?.mail(id, wire);
+  }, [persistHistory, persistOutbox, wrap]);
 
   /** Re-post anything the partner never acknowledged. */
   const flushOutbox = useCallback(() => {
@@ -369,12 +432,15 @@ export default function App() {
         peer.send({ k: 'status-list', items: mine.map(toSummary) });
       },
       onEnvelope: (e) => applyEnvelope(e),
-      onMedia: (id, kind, uri, mime, bytes, at, duration) => {
+      onMedia: (id, kind, uri, mime, bytes, at, duration, exp, once) => {
         if (seenRef.current.has(id)) return;
         seenRef.current.add(id);
         setMessages((m) => [
           ...m.filter((x) => x.id !== id),
-          { id, kind: 'in', body: '', at, media: { kind, uri, mime, bytes, duration } },
+          {
+            id, kind: 'in', body: '', at, expiresAt: exp, viewOnce: once,
+            media: { kind, uri, mime, bytes, duration },
+          },
         ]);
       },
       onMediaProgress: (id, progress) => {
@@ -431,9 +497,7 @@ export default function App() {
       },
       onMail: (id, wire, at) => {
         // Still sealed at this point; only we hold the key.
-        const peer = peerRef.current;
-        if (!peer) return;
-        const e = peer.unwrap(wire);
+        const e = unwrap(wire);
         if (e) applyEnvelope(e, at);
       },
       onMailDone: (count) => {
@@ -465,9 +529,10 @@ export default function App() {
       loadStatuses(keys.msgKey),
     ]);
 
-    history.forEach((m) => seenRef.current.add(m.id));
+    const live = dropExpired(history);
+    live.forEach((m) => seenRef.current.add(m.id));
     outboxRef.current = outbox;
-    setMessages(history);
+    setMessages(live);
     setMyStatuses(mine);
     myStatusesRef.current = mine;
 
@@ -567,11 +632,17 @@ export default function App() {
     const at = Date.now();
     const uri = `data:${mime};base64,${b64}`;
 
+    const ttl = settingsRef.current.messageTtl;
+    const expiresAt = ttl > 0 ? at + ttl : undefined;
+    // One look only is for photographs. A video already has a player with a
+    // scrub bar in it, and a voice note has nothing to look at.
+    const once = onceRef.current && kind === 'photo';
+
     const showIt = (delivery: Msg['delivery'], progress?: number) =>
       setMessages((m) => {
         const existing = m.some((x) => x.id === id);
         const row: Msg = {
-          id, kind: 'out', body: '', at, delivery, progress,
+          id, kind: 'out', body: '', at, delivery, progress, expiresAt, viewOnce: once,
           media: { kind, uri, mime, bytes, duration },
         };
         return existing ? m.map((x) => (x.id === id ? row : x)) : [...m, row];
@@ -584,7 +655,7 @@ export default function App() {
       const ok = await peer.sendMedia(id, kind, b64, mime, bytes, duration, (p) => {
         setSending({ id, progress: p });
         setMessages((m) => m.map((x) => (x.id === id ? { ...x, progress: p } : x)));
-      });
+      }, undefined, expiresAt, once);
       setSending(null);
       showIt(ok ? 'delivered' : 'failed');
       return ok;
@@ -598,15 +669,16 @@ export default function App() {
       );
       return false;
     }
-    if (!peer) return false;
-
     showIt('sending');
-    const wire = peer.wrap({ k: 'media-whole', id, kind, mime, bytes, duration, b64, at });
+    const wire = wrap({
+      k: 'media-whole', id, kind, mime, bytes, duration, b64, at, exp: expiresAt, once,
+    });
+    if (!wire) return false;
     outboxRef.current = [...outboxRef.current, { id, wire, at }];
     persistOutbox();
     if (!sig?.mail(id, wire)) markDelivered(id, 'sending');
     return true;
-  }, [markDelivered, persistOutbox]);
+  }, [markDelivered, persistOutbox, wrap]);
 
   const shipMedia = useCallback(async (
     kind: MediaKind,
@@ -848,6 +920,24 @@ export default function App() {
    */
   const reportedSeen = useRef<Set<string>>(new Set());
 
+  /**
+   * Spend the single look.
+   *
+   * The bytes go, not just the ability to open them again: a photo left in
+   * memory with a flag saying not to draw it is still a photo on the phone.
+   * The row stays so the conversation still reads sensibly, saying only that
+   * something was opened.
+   */
+  const burnViewOnce = useCallback((id: string) => {
+    setMessages((m) => {
+      const next = m.map((x) =>
+        x.id === id ? { ...x, viewed: true, media: undefined } : x,
+      );
+      persistHistory(next);
+      return next;
+    });
+  }, [persistHistory]);
+
   const markSeen = useCallback((ids: string[]) => {
     if (!settingsRef.current.sendReadReceipts) return;
     const fresh = ids.filter((id) => !reportedSeen.current.has(id));
@@ -1019,6 +1109,8 @@ export default function App() {
     if (screen === 'chat' && unlocked) {
       return (
         <Chat
+          onSetOnce={(on) => { onceRef.current = on; }}
+          onBurn={burnViewOnce}
           messages={messages}
           status={status}
           connected={connected}

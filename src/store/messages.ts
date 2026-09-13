@@ -37,6 +37,19 @@ export type Msg = {
   delivery?: Delivery;
   /** Progress 0..1 while a photo or video is still arriving. */
   progress?: number;
+  /** When this vanishes from both phones. See Expiring below. */
+  expiresAt?: number;
+  /**
+   * A photo meant to be looked at once.
+   *
+   * On the receiving phone, opening it is the last time it exists: the bytes
+   * are dropped when the viewer closes and the bubble becomes a note saying it
+   * was opened. The sender keeps their own copy for the session, as they do
+   * with everything else.
+   */
+  viewOnce?: boolean;
+  /** Set once it has been looked at, on either phone. */
+  viewed?: boolean;
 };
 
 let seq = 0;
@@ -57,3 +70,36 @@ export const mkMsg = (
   at,
   ...extra,
 });
+
+/**
+ * When a message should vanish from both phones.
+ *
+ * Carried on the message rather than worked out from a setting at display
+ * time, because the two phones can have different settings and a message that
+ * disappeared on one and not the other would be worse than no timer at all.
+ * The sender's choice at the moment of sending travels with it, and both sides
+ * honour the same instant.
+ */
+export type Expiring = {
+  /** Absolute ms. Undefined means it stays until the app is closed. */
+  expiresAt?: number;
+};
+
+/** The choices offered, in the order they appear in Settings. */
+export const TTL_CHOICES: { label: string; ms: number }[] = [
+  { label: 'Off', ms: 0 },
+  { label: '1 hour', ms: 60 * 60 * 1000 },
+  { label: '8 hours', ms: 8 * 60 * 60 * 1000 },
+  { label: '1 day', ms: 24 * 60 * 60 * 1000 },
+  { label: '7 days', ms: 7 * 24 * 60 * 60 * 1000 },
+];
+
+export const ttlLabel = (ms: number): string =>
+  TTL_CHOICES.find((c) => c.ms === ms)?.label ?? 'Off';
+
+/** Drop anything whose time is up. Returns the same array when nothing went,
+ *  so callers can skip a re-render and a write to disk. */
+export function dropExpired(msgs: Msg[], now = Date.now()): Msg[] {
+  const live = msgs.filter((m) => !m.expiresAt || m.expiresAt > now);
+  return live.length === msgs.length ? msgs : live;
+}

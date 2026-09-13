@@ -41,6 +41,10 @@ type Props = {
   onDeleteMessages: (ids: string[], forBoth: boolean) => void;
   onClearChat: (forBoth: boolean) => void;
   onPickPhoto: (fromCamera: boolean) => void;
+  /** Arm or disarm one-look-only before a photo is picked. */
+  onSetOnce: (on: boolean) => void;
+  /** A one-look photo has been opened; drop its bytes on this phone. */
+  onBurn: (id: string) => void;
   onPickVideo: (fromCamera: boolean) => void;
   onSendRecording: (uri: string, seconds: number) => void;
   onCall: (kind: 'audio' | 'video') => void;
@@ -145,6 +149,7 @@ export default function Chat({
   onSend, onAddTextStatus, onAddStatusMedia, onRemoveStatus, onWantStatusMedia,
   onLoadMyStatusMedia, onMarkSeen, onDeleteMessages, onClearChat,
   onPickPhoto, onPickVideo, onSendRecording, onCall, onLock, onSettings,
+  onSetOnce, onBurn,
 }: Props) {
   const [draft, setDraft] = useState('');
   const [attachOpen, setAttachOpen] = useState(false);
@@ -153,6 +158,8 @@ export default function Chat({
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [viewing, setViewing] = useState<Msg | null>(null);
+  /** Armed in the attach sheet: the next photo is one look only. */
+  const [once, setOnce] = useState(false);
 
   /** Which list is open in the story viewer, and where we are in it. */
   const [story, setStory] = useState<{ mine: boolean; index: number } | null>(null);
@@ -437,6 +444,9 @@ export default function Chat({
                   if (selecting) return toggleSelect(item.id);
                   if (m?.kind === 'photo') setViewing(item);
                 }}
+                // A one-look photo must not be readable from the list itself,
+                // so it is never drawn small — only inside the viewer, once.
+                disabled={item.viewOnce && item.viewed}
                 style={[
                   s.row,
                   { justifyContent: isMine ? 'flex-end' : 'flex-start' },
@@ -444,7 +454,15 @@ export default function Chat({
                 ]}
               >
                 <View style={[s.bubble, isMine ? s.mine : s.theirs, m ? s.bubbleMedia : null]}>
-                  {m?.kind === 'photo' && (
+                  {item.viewOnce && item.viewed && (
+                    <Text style={s.burnt}>Opened · the photo is gone</Text>
+                  )}
+                  {item.viewOnce && !item.viewed && !!m && (
+                    <Text style={s.burnt}>
+                      {isMine ? 'Photo · one look only' : 'Photo · tap to open, once'}
+                    </Text>
+                  )}
+                  {m?.kind === 'photo' && !item.viewOnce && (
                     <Image source={{ uri: m.uri }} style={s.media} resizeMode="cover" />
                   )}
                   {m?.kind === 'video' && <VideoBubble uri={m.uri} />}
@@ -658,6 +676,22 @@ export default function Chat({
                 ? 'Sent straight between the phones and never saved, on either side.'
                 : 'They are not in the app, so this waits for them — sealed, on the relay that cannot read it, and deleted the moment they collect it. Long videos need you both here.'}
             </Text>
+            <TouchableOpacity
+              style={[s.onceRow, once && s.onceRowOn]}
+              onPress={() => { setOnce(!once); onSetOnce(!once); }}
+              activeOpacity={0.8}
+            >
+              <View style={[s.onceBox, once && s.onceBoxOn]}>
+                {once && <Text style={s.onceTick}>✓</Text>}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.onceTitle}>One look only</Text>
+                <Text style={s.onceSub}>
+                  They can open the photo once. After that it is gone from their phone.
+                </Text>
+              </View>
+            </TouchableOpacity>
+
             {([
               ['Photo from gallery', () => onPickPhoto(false)],
               ['Take a photo', () => onPickPhoto(true)],
@@ -683,7 +717,15 @@ export default function Chat({
         animationType="fade"
         onRequestClose={() => setViewing(null)}
       >
-        <TouchableOpacity style={s.viewer} activeOpacity={1} onPress={() => setViewing(null)}>
+        <TouchableOpacity
+          style={s.viewer}
+          activeOpacity={1}
+          onPress={() => {
+            const shown = viewing;
+            setViewing(null);
+            if (shown?.viewOnce && !shown.viewed) onBurn(shown.id);
+          }}
+        >
           <View style={s.viewerBody}>
             {viewing?.media && (
               <Image
@@ -701,6 +743,25 @@ export default function Chat({
 }
 
 const s = StyleSheet.create({
+  onceRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12,
+    borderWidth: 1, borderColor: T.vaultLine, marginBottom: 10,
+  },
+  onceRowOn: { borderColor: T.mine, backgroundColor: 'rgba(42,91,215,0.12)' },
+  onceBox: {
+    width: 22, height: 22, borderRadius: 6,
+    borderWidth: 1.5, borderColor: T.vaultInkSoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  onceBoxOn: { backgroundColor: T.mine, borderColor: T.mine },
+  onceTick: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  onceTitle: { color: T.vaultInk, fontSize: 15, fontWeight: '600' },
+  onceSub: { color: T.vaultInkSoft, fontSize: 12, marginTop: 2, lineHeight: 17 },
+  burnt: {
+    color: T.vaultInkSoft, fontSize: 13.5, fontStyle: 'italic',
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
   wrap: { flex: 1, backgroundColor: T.vaultBg },
   bar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

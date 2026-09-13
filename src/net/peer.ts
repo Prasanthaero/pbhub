@@ -36,7 +36,7 @@ export type PeerEvents = {
   /** A media transfer finished arriving. */
   onMedia: (
     id: string, kind: MediaKind, uri: string, mime: string, bytes: number,
-    at: number, duration?: number,
+    at: number, duration?: number, exp?: number, once?: boolean,
   ) => void;
   /** Status media that was asked for, keyed by the status it belongs to. */
   onStatusMedia: (statusId: string, uri: string, mime: string) => void;
@@ -170,7 +170,9 @@ export class Peer {
       case 'media-start': {
         this.incoming.set(
           p.id,
-          new MediaAssembler(p.id, p.kind, p.mime, p.bytes, p.chunks, p.at, p.duration),
+          new MediaAssembler(
+            p.id, p.kind, p.mime, p.bytes, p.chunks, p.at, p.duration, p.exp, p.once,
+          ),
         );
         if (p.statusId) {
           // A status being fetched. Deliberately no progress event: this is not
@@ -199,7 +201,9 @@ export class Peer {
           this.ev.onStatusMedia(statusId, a.toDataUri(), a.mime);
           return;
         }
-        this.ev.onMedia(a.id, a.kind, a.toDataUri(), a.mime, a.bytes, a.at, a.duration);
+        this.ev.onMedia(
+          a.id, a.kind, a.toDataUri(), a.mime, a.bytes, a.at, a.duration, a.exp, a.once,
+        );
         return;
       }
       case 'media-abort': {
@@ -273,6 +277,9 @@ export class Peer {
     duration: number | undefined,
     onProgress: (p: number) => void,
     statusId?: string,
+    /** Absolute ms when both phones drop it, and whether it is one look only. */
+    exp?: number,
+    once?: boolean,
   ): Promise<boolean> {
     if (!this.isOpen) return false;
 
@@ -280,6 +287,7 @@ export class Peer {
     const at = Date.now();
     this.send({
       k: 'media-start', id, kind, mime, bytes, chunks: chunks.length, duration, at, statusId,
+      exp, once,
     });
 
     for (let i = 0; i < chunks.length; i++) {
