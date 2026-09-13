@@ -71,13 +71,28 @@ wss.on('connection', (ws) => {
       if (!/^[0-9a-f]{32}$/.test(id)) return ws.close();
 
       const set = rooms.get(id) || new Set();
+
+      // Drop anything in the room that has already failed a ping. Without this
+      // a phone that was killed (battery, force-stop, crashed emulator) holds
+      // its slot until the next sweep, and its owner cannot get back in.
+      [...set].forEach((c) => {
+        if (c.readyState !== c.OPEN) {
+          set.delete(c);
+          try { c.terminate(); } catch {}
+        }
+      });
+
       if (set.size >= MAX_ROOM) {
         send(ws, { t: 'full' });
         return ws.close();
       }
 
       ws.roomId = id;
-      ws.role = set.size === 0 ? 'a' : 'b';
+      // Take whichever slot is actually free, rather than guessing from the
+      // count. A socket that died without closing cleanly still occupies the
+      // room until the next ping sweep, and counting would then hand the same
+      // role to both peers.
+      ws.role = [...set].some((c) => c.role === 'a') ? 'b' : 'a';
       set.add(ws);
       rooms.set(id, set);
 

@@ -18,6 +18,8 @@ import {
 } from 'react-native-webrtc';
 import type { Role } from './signaling';
 import { seal, unseal } from '../crypto/vault';
+import { randomBytes } from '../crypto/random';
+import { toHex } from '../crypto/vault';
 
 export type CallKind = 'audio' | 'video';
 
@@ -35,11 +37,28 @@ export class Peer {
   private dc: any = null;
   private makingOffer = false;
   private ignoreOffer = false;
-  private polite: boolean;
+  private polite = true;
   private localStream: MediaStream | null = null;
   private senders: any[] = [];
 
   private role: Role;
+  /**
+   * Who offers, and who yields in a collision.
+   *
+   * This used to come from the role the relay handed out, which it derived from
+   * how many sockets were already in the room. That is wrong whenever the count
+   * is stale: kill a phone without a clean close and its socket lingers, so both
+   * peers can reconnect and be told the same thing. Two impolite peers ignore
+   * each other's offers forever, and the symptom is a connection that reports
+   * "partner is here" and then never opens.
+   *
+   * A random tag each, compared, cannot collide in that way — it does not care
+   * who arrived first, how many times either side reconnected, or what the relay
+   * believes about the room.
+   */
+  private tag = toHex(randomBytes(16));
+  private peerTag: string | null = null;
+  private negotiating = false;
   private key: Uint8Array;
   private sendSignal: (m: any) => void;
   private ev: PeerEvents;
@@ -55,9 +74,6 @@ export class Peer {
     this.key = key;
     this.sendSignal = sendSignal;
     this.ev = ev;
-
-    // Role 'a' (first to arrive) yields in a collision; 'b' drives.
-    this.polite = role === 'a';
 
     this.pc = new RTCPeerConnection({
       iceServers,
@@ -97,11 +113,20 @@ export class Peer {
     });
   }
 
-  /** The impolite side opens the channel; the other receives it.
+  /** Announce ourselves. Whoever has the higher tag will open the channel.
    *  Safe to call repeatedly — the relay re-announces presence on reconnect. */
   start() {
-    if (this.role !== 'b' || this.dc) return;
-    this.bindChannel(this.pc.createDataChannel('n', { ordered: true }));
+    this.sendSignal({ kind: 'hello', tag: this.tag });
+  }
+
+  /** Both tags known: settle who drives, and let that side open the channel. */
+  private beginNegotiation() {
+    if (!this.peerTag || this.negotiating || this.dc) return;
+    this.negotiating = true;
+    this.polite = this.tag < this.peerTag;
+    if (!this.polite) {
+      this.bindChannel(this.pc.createDataChannel('n', { ordered: true }));
+    }
   }
 
   private bindChannel(ch: any) {
@@ -137,6 +162,14 @@ export class Peer {
   /** Inbound SDP/ICE from the relay. */
   async handleSignal(msg: any) {
     try {
+      if (msg.kind === 'hello') {
+        this.peerTag = String(msg.tag);
+        // Answer so a peer that announced before we existed still learns our
+        // tag; the guard in beginNegotiation keeps this from ping-ponging.
+        this.sendSignal({ kind: 'hello', tag: this.tag });
+        this.beginNegotiation();
+        return;
+      }
       if (msg.kind === 'sdp') {
         const description = msg.description;
         const offerCollision =
