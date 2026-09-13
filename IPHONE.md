@@ -103,7 +103,12 @@ TestFlight builds expire after **90 days**, so it needs rebuilding quarterly.
 
 ## What is different on an iPhone
 
-**Screenshot blocking works**, from iOS 13 onwards — same as Android.
+**Screenshot blocking does not really work.** This said it did, and that was
+wrong. iOS lets an app blank itself during a *screen recording*, and gives no
+app any way to stop a *screenshot* — Apple has never offered one. So the switch
+in Settings covers recording only, and the app says so on an iPhone rather than
+promising something it cannot do. On Android it covers both. It is off by
+default on either platform now.
 
 **Sharing into the app works**, but needs a share extension, which EAS builds
 automatically from the `expo-share-intent` configuration already in `app.json`.
@@ -113,9 +118,13 @@ preview, and only while iOS leaves the app alive in the background. iOS is
 stricter about that than Android, so expect it to last minutes rather than
 hours.
 
-**Calls work**, but iOS is aggressive about suspending apps. A call that is
-already running is fine; being *reached* for a call while the app is in the
-background is not something this design supports on either platform.
+**Calls work**, and a call in progress now survives the screen locking: the
+build declares the `audio` background mode, without which iOS suspends the app
+the moment it leaves the screen and the call dies mid-sentence. That was the
+same fault Android had, fixed there by not locking the vault during a call.
+
+Being *reached* for a call while the app is closed is still not something this
+design supports on either platform — there is no push service to wake it.
 
 ---
 

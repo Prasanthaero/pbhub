@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert, StatusBar,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { T } from '../theme';
@@ -196,6 +197,9 @@ export default function VaultSettingsScreen({
               refuses both, and the app shows as a blank square in the recent-apps preview — which
               hides the conversation from anyone thumbing through your open apps, and also means
               you cannot keep a picture of anything in it.
+              {Platform.OS === 'ios'
+                ? ' On iPhone this only covers screen recording. Apple gives no app a way to stop a screenshot, so switching it on here cannot promise one.'
+                : ''}
             </Text>
           </View>
           <Switch value={block} onValueChange={setBlock} />

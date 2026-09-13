@@ -16,13 +16,16 @@
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.pb.notes",
       "infoPlist": {
-        "NSCameraUsageDescription": "Attach photos to your notes.",
-        "NSMicrophoneUsageDescription": "Record voice memos for your notes.",
+        "NSCameraUsageDescription": "Take a picture to put in a note.",
+        "NSMicrophoneUsageDescription": "Record a voice memo for a note.",
         "ITSAppUsesNonExemptEncryption": false,
-        "NSPhotoLibraryUsageDescription": "Attach pictures to your notes."
+        "NSPhotoLibraryUsageDescription": "Attach a picture to a note.",
+        "UIBackgroundModes": [
+          "audio"
+        ]
       },
       "buildNumber": "1"
     },
@@ -82,7 +85,15 @@
           "androidMultiIntentFilters": [
             "image/*",
             "video/*"
-          ]
+          ],
+          "iosShareExtensionName": "Notes",
+          "iosAppGroupIdentifier": "group.com.pb.notes",
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsImageWithMaxCount": 1,
+            "NSExtensionActivationSupportsMovieWithMaxCount": 1,
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1
+          }
         }
       ],
       [
