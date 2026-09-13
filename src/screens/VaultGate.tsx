@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { T } from '../theme';
+import { inExpoGo } from '../env';
 import { RELAY_EXAMPLE } from '../store/vaultStore';
 import {
   generatePairingSecret, bytesToWords, wordsToBytes, PAIRING_BYTES,
@@ -153,9 +154,11 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
         <Text style={{ color: T.vaultInkSoft, fontSize: 16 }}>Back</Text>
       </TouchableOpacity>
 
+      {/* Same reasoning as NoteEditor: a real Android build needs nothing here. */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        enabled={Platform.OS === 'ios' || inExpoGo}
       >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           <Text style={s.h}>Set up</Text>

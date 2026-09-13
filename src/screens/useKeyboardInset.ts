@@ -1,24 +1,28 @@
 /**
- * Keeping the message box above the keyboard, on iOS.
+ * Keeping the message box above the keyboard.
  *
  * An iOS window never changes size when the keyboard appears — the keyboard is
  * simply drawn over the bottom of it — so anything anchored to the bottom has to
- * be lifted by hand. That is what this does: report how far.
+ * be lifted by hand. That is what this reports: how far.
  *
- * Android is handled underneath instead, in plugins/withKeyboardInsets.js, where
- * the activity pads its own content view by the keyboard inset and every layout
- * above it reflows on its own. It has to be done there: React Native's Android
- * keyboard events are unusable on a modern edge-to-edge window, where
- * `keyboardDidShow` reports the navigation bar rather than the keyboard, with a
- * negative height. So this hook stays out of the way on Android and returns
- * nothing.
+ * In a real Android build this does nothing, because the activity has already
+ * padded itself by the keyboard inset (plugins/withKeyboardInsets.js) and every
+ * layout above it has reflowed. That work has to happen down there: React
+ * Native's Android keyboard events are unreliable on a modern edge-to-edge
+ * window, where `keyboardDidShow` has been seen reporting the navigation bar
+ * instead of the keyboard, as a negative height.
  *
- * The measurement is a subtraction rather than the raw keyboard height, so that
- * if a platform ever does resize the window again, the lift quietly becomes
- * zero instead of pushing the box up twice as far.
+ * Inside Expo Go there is no such activity to lean on — it is Expo Go's, and our
+ * plugin is not in it — so the hook takes the job on there and makes what it can
+ * of React Native's numbers, ignoring any that are not a plausible keyboard.
+ *
+ * The measurement is a subtraction rather than the raw keyboard height, so where
+ * something else has already made room, the lift quietly becomes zero instead of
+ * pushing the box up twice as far.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Keyboard, Platform, type LayoutChangeEvent } from 'react-native';
+import { inExpoGo } from '../env';
 
 export function useKeyboardInset() {
   const [keyboard, setKeyboard] = useState(0);
@@ -30,14 +34,21 @@ export function useKeyboardInset() {
   const full = useRef(0);
 
   useEffect(() => {
-    if (Platform.OS !== 'ios') return;
+    const ios = Platform.OS === 'ios';
+    // Android normally needs nothing here — the activity pads itself. Inside
+    // Expo Go the activity is Expo Go's, so there is nobody else to do it.
+    if (!ios && !inExpoGo) return;
 
     // iOS announces the keyboard before it moves, which lets the lift animate
     // alongside it rather than snapping into place afterwards.
-    const rising = Keyboard.addListener('keyboardWillShow', (e) =>
-      setKeyboard(e.endCoordinates.height),
-    );
-    const falling = Keyboard.addListener('keyboardWillHide', () => {
+    const rising = Keyboard.addListener(ios ? 'keyboardWillShow' : 'keyboardDidShow', (e) => {
+      // Android has been seen reporting the navigation bar instead of the
+      // keyboard, as a negative number. Anything at or below zero is not a
+      // keyboard, so treat it as no keyboard rather than as a measurement.
+      const h = e.endCoordinates?.height ?? 0;
+      setKeyboard(h > 0 ? h : 0);
+    });
+    const falling = Keyboard.addListener(ios ? 'keyboardWillHide' : 'keyboardDidHide', () => {
       setKeyboard(0);
       setWindowGave(0);
     });

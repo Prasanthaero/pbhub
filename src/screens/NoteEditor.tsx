@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { T } from '../theme';
+import { inExpoGo } from '../env';
 import type { Note } from '../store/notes';
 
 type Props = {
@@ -53,13 +54,14 @@ export default function NoteEditor({ note, onSave, onDelete, onCancel }: Props) 
         </View>
       </View>
 
-      {/* iOS only: on Android the activity pads itself by the keyboard inset
-          (plugins/withKeyboardInsets.js), and a second adjustment on top of that
-          would move the page twice. */}
+      {/* Off in a real Android build: the activity pads itself by the keyboard
+          inset (plugins/withKeyboardInsets.js), and adjusting again on top of
+          that would move the page twice. Inside Expo Go that plugin is not
+          there, so this has to do the work. */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        enabled={Platform.OS === 'ios'}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        enabled={Platform.OS === 'ios' || inExpoGo}
       >
         <TextInput
           style={s.title}

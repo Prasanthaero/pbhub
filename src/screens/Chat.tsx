@@ -3,8 +3,9 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Image, ScrollView,
   StatusBar, ActivityIndicator, Modal, Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboardInset } from './useKeyboardInset';
+import { inExpoGo } from '../env';
 import {
   useAudioRecorder, useAudioPlayer, RecordingPresets,
   setAudioModeAsync, requestRecordingPermissionsAsync,
@@ -153,6 +154,18 @@ export default function Chat({
 
   /** How far the message box has to rise to clear the keyboard. */
   const { inset, onLayout } = useKeyboardInset();
+
+  /**
+   * And how far to clear the navigation bar underneath it.
+   *
+   * A real build has nothing to do here — the activity already sits above the
+   * navigation bar. As a guest in Expo Go the app draws to the very bottom of
+   * the screen, which put the message box and Send button half behind the
+   * navigation buttons. The keyboard, when it is up, covers that bar anyway, so
+   * it is whichever of the two is taller, never both.
+   */
+  const safeBottom = useSafeAreaInsets().bottom;
+  const bottomPad = inExpoGo ? Math.max(inset, safeBottom) : inset;
 
   const listRef = useRef<FlatList<Msg>>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -366,10 +379,11 @@ export default function Chat({
         </View>
       )}
 
-      {/* The message box rides above the keyboard. See useKeyboardInset — the
-          lift is measured rather than assumed, because newer Androids no longer
-          resize the window and the box would otherwise sit underneath the keys. */}
-      <View style={{ flex: 1, paddingBottom: inset }} onLayout={onLayout}>
+      {/* The message box rides above the keyboard, and clear of the navigation
+          bar. See useKeyboardInset — the lift is measured rather than assumed,
+          because newer Androids no longer resize the window and the box would
+          otherwise sit underneath the keys. */}
+      <View style={{ flex: 1, paddingBottom: bottomPad }} onLayout={onLayout}>
         <FlatList
           ref={listRef}
           data={messages}
