@@ -23,7 +23,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
@@ -34,7 +34,8 @@
     "test:crypto": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-crypto.mjs",
     "test:signaling": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-signaling.mjs",
     "test": "npm run test:crypto && npm run test:signaling",
-    "icons": "node scripts/make-icons.cjs"
+    "icons": "node scripts/make-icons.cjs",
+    "dev": "expo run:android"
   },
   "private": true
 }

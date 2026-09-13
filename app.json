@@ -65,7 +65,8 @@
           }
         }
       ],
-      "./plugins/withReleaseSigning"
+      "./plugins/withReleaseSigning",
+      "./plugins/withDebugCleartext"
     ]
   }
 }
