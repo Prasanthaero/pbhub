@@ -10,13 +10,16 @@
  * cannot deadlock if both sides act at once. Who yields is decided by comparing
  * random tags rather than by join order — see `tag` below.
  */
+// Through the shim rather than straight from the package, so a build without
+// WebRTC in it still starts. See src/net/webrtc.ts.
 import {
-  RTCPeerConnection,
-  RTCSessionDescription,
-  RTCIceCandidate,
+  RTCPeerConnectionCtor,
+  RTCSessionDescriptionCtor,
+  RTCIceCandidateCtor,
   mediaDevices,
-  MediaStream,
-} from 'react-native-webrtc';
+  type MediaStream,
+  type RTCPeerConnection,
+} from './webrtc';
 import type { Role } from './signaling';
 import { seal, unseal, toHex } from '../crypto/vault';
 import { randomBytes } from '../crypto/random';
@@ -91,7 +94,7 @@ export class Peer {
     this.sendSignal = sendSignal;
     this.ev = ev;
 
-    this.pc = new RTCPeerConnection({
+    this.pc = new (RTCPeerConnectionCtor())({
       iceServers,
       // Gather a few candidates up front so the first offer already carries a
       // usable path, rather than waiting on a full trickle round trip.
@@ -314,14 +317,14 @@ export class Peer {
         this.ignoreOffer = !this.polite && offerCollision;
         if (this.ignoreOffer) return;
 
-        await this.pc.setRemoteDescription(new RTCSessionDescription(description));
+        await this.pc.setRemoteDescription(new (RTCSessionDescriptionCtor())(description));
         if (description.type === 'offer') {
           await this.pc.setLocalDescription();
           this.sendSignal({ kind: 'sdp', description: this.pc.localDescription });
         }
       } else if (msg.kind === 'ice') {
         try {
-          await this.pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+          await this.pc.addIceCandidate(new (RTCIceCandidateCtor())(msg.candidate));
         } catch {
           if (!this.ignoreOffer) throw new Error('ice');
         }
@@ -334,7 +337,7 @@ export class Peer {
   /** Attach camera/mic. Triggers renegotiation automatically. */
   async openMedia(kind: CallKind): Promise<MediaStream | null> {
     if (this.localStream) return this.localStream;
-    const stream = (await mediaDevices.getUserMedia({
+    const stream = (await mediaDevices().getUserMedia({
       audio: true,
       video: kind === 'video' ? { facingMode: 'user', width: 1280, height: 720 } : false,
     })) as MediaStream;

@@ -24,13 +24,13 @@ import {
 } from './src/store/statusMedia';
 import { Signaling, type Role } from './src/net/signaling';
 import { Peer, type CallKind } from './src/net/peer';
+import { available as webrtcAvailable } from './src/net/webrtc';
 import { MAX_OFFLINE_MEDIA_BYTES, type Envelope } from './src/net/transport';
 import { prepareNotifications, showDot, clearDot } from './src/net/notify';
 import { pickPhoto, pickVideo, readRecording, TooLarge } from './src/media/pick';
 import {
   readSharedFile, toStatusImage, kindForMime, type SharedItem,
 } from './src/media/shared';
-import { useShareIntent } from 'expo-share-intent';
 import * as ImagePicker from 'expo-image-picker';
 
 import NotesList from './src/screens/NotesList';
@@ -340,6 +340,12 @@ export default function App() {
 
   // ---- transport ---------------------------------------------------------
   const buildPeer = useCallback((keys: VaultKeys, cfg: VaultSettings, role: Role) => {
+    // No WebRTC in this build (Expo Go): never attempt a direct connection.
+    // Everything then takes the path already built for a partner who is not in
+    // the app — sealed through the relay. Text and photos still arrive; calls
+    // are not offered, because there is nothing to carry them.
+    if (!webrtcAvailable) return;
+
     const peer = new Peer(role, cfg.iceServers, keys.msgKey, (m) => sigRef.current?.send(m), {
       onChannelOpen: (open) => {
         setConnected(open);

@@ -1,7 +1,9 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { RTCView, type MediaStream } from 'react-native-webrtc';
+// Through the shim: RTCView is null where WebRTC is absent, and a call screen
+// cannot be reached there anyway. See src/net/webrtc.ts.
+import { RTCView, type MediaStream } from '../net/webrtc';
 import { T } from '../theme';
 
 export type CallState = 'outgoing' | 'incoming' | 'active';
@@ -35,7 +37,7 @@ export default function Call({
     <SafeAreaView style={s.wrap}>
       <StatusBar barStyle="light-content" backgroundColor="#000" />
 
-      {video && remoteStream ? (
+      {video && remoteStream && RTCView ? (
         <RTCView streamURL={remoteStream.toURL()} objectFit="cover" style={StyleSheet.absoluteFill} />
       ) : (
         <View style={[StyleSheet.absoluteFill, s.audioBg]}>
@@ -43,7 +45,7 @@ export default function Call({
         </View>
       )}
 
-      {video && localStream && !cameraOff && (
+      {video && localStream && !cameraOff && RTCView && (
         <RTCView streamURL={localStream.toURL()} objectFit="cover" style={s.pip} mirror />
       )}
 
