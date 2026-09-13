@@ -61,6 +61,9 @@ export default function VaultSettingsScreen({
       panicOnBackground: panic,
       blockScreenshots: block,
       keepHistory: keep,
+      // Not a user setting — it records that the two phones have actually met,
+      // so saving other settings must not quietly reset it.
+      pairedOnce: settings.pairedOnce,
     });
   };
 

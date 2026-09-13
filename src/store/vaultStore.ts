@@ -45,6 +45,15 @@ export type VaultSettings = {
    * Media is never kept either way.
    */
   keepHistory: boolean;
+  /**
+   * Whether a partner has ever actually connected on this pairing.
+   *
+   * The way pairing goes wrong is quiet: both people tap "make one up", each
+   * ends up in their own room, and both sit at "waiting for partner" forever
+   * with nothing on screen suggesting they are not even in the same place.
+   * Until this has been true once, the app says so plainly.
+   */
+  pairedOnce: boolean;
 };
 
 export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
@@ -53,6 +62,7 @@ export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
   panicOnBackground: true,
   blockScreenshots: true,
   keepHistory: false,
+  pairedOnce: false,
 });
 
 export async function readMarker(): Promise<VaultBlob | null> {

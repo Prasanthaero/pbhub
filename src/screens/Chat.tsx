@@ -21,6 +21,8 @@ type Props = {
   connected: boolean;
   relayUp: boolean;
   keepHistory: boolean;
+  /** False until a partner has actually connected at least once. */
+  pairedOnce: boolean;
   myStatuses: StatusItem[];
   theirStatuses: StatusItem[];
   sending: { id: string; progress: number } | null;
@@ -117,7 +119,8 @@ function StatusBubble({
 }
 
 export default function Chat({
-  messages, status, connected, relayUp, keepHistory, myStatuses, theirStatuses, sending,
+  messages, status, connected, relayUp, keepHistory, pairedOnce,
+  myStatuses, theirStatuses, sending,
   onSend, onAddTextStatus, onAddStatusMedia, onRemoveStatus, onWantStatusMedia,
   onLoadMyStatusMedia, onDeleteMessages, onClearChat,
   onPickPhoto, onPickVideo, onSendRecording, onCall, onLock, onSettings,
@@ -314,6 +317,18 @@ export default function Chat({
           <Text style={s.noStatus}>No status from them</Text>
         )}
       </ScrollView>
+
+      {!pairedOnce && (
+        <View style={s.notPaired}>
+          <Text style={s.notPairedTitle}>Not paired yet</Text>
+          <Text style={s.notPairedBody}>
+            Your partner has never connected on this code. If you both made your own code, you are
+            each in a different room and will wait forever. Only one of you makes it — the other
+            scans it or types the same eight words. Check Settings (•••) shows the same short code
+            on both phones.
+          </Text>
+        </View>
+      )}
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -645,6 +660,12 @@ const s = StyleSheet.create({
   rowDivider: { width: 1, height: 44, backgroundColor: T.vaultLine, marginHorizontal: 10 },
   noStatus: { color: T.vaultInkSoft, fontSize: 13, fontStyle: 'italic', paddingHorizontal: 8 },
 
+  notPaired: {
+    backgroundColor: 'rgba(201,162,39,0.12)', borderBottomWidth: 1, borderBottomColor: T.accent,
+    paddingHorizontal: 16, paddingVertical: 12,
+  },
+  notPairedTitle: { color: T.accent, fontSize: 14, fontWeight: '700' },
+  notPairedBody: { color: T.vaultInkSoft, fontSize: 12.5, lineHeight: 18, marginTop: 5 },
   preamble: {
     color: T.vaultInkSoft, fontSize: 12, textAlign: 'center',
     marginBottom: 18, marginTop: 6, paddingHorizontal: 20, lineHeight: 18,

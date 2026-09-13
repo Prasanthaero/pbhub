@@ -292,6 +292,16 @@ export default function App() {
         setStatus(open ? 'Connected, direct' : 'Waiting for partner…');
         if (!open) return;
         pushSystem('Connected directly.');
+
+        // First time the two phones have ever met on this pairing. Remember it,
+        // so the "not paired yet" warning stops for good.
+        if (!settingsRef.current.pairedOnce) {
+          const confirmed = { ...settingsRef.current, pairedOnce: true };
+          settingsRef.current = confirmed;
+          setSettings(confirmed);
+          if (keysRef.current) writeSettings(keysRef.current.msgKey, confirmed).catch(() => {});
+        }
+
         flushOutbox();
         const mine = myStatusesRef.current.filter(isLiveItem);
         peer.send({ k: 'status-list', items: mine.map(toSummary) });
@@ -886,6 +896,7 @@ export default function App() {
           connected={connected}
           relayUp={relayUp}
           keepHistory={settings.keepHistory}
+          pairedOnce={settings.pairedOnce}
           myStatuses={myStatuses}
           theirStatuses={theirStatuses}
           sending={sending}
