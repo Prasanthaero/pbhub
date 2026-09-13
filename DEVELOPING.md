@@ -81,6 +81,67 @@ Check it is connected:
 
 You should see `emulator-5554   device`.
 
+## Using Android Studio
+
+Android Studio is genuinely useful here, but for the native half only. The split
+is worth getting right:
+
+| Job | Use |
+|---|---|
+| Editing screens, chat, crypto (`.tsx`, `.ts`) | VS Code |
+| Creating and starting emulators | Android Studio → Device Manager |
+| Running / installing onto a device | Either |
+| Reading crash logs (Logcat) | Android Studio |
+| Installing SDK pieces | Android Studio → SDK Manager |
+
+### Open the right folder
+
+**Open `pbhubandroid`, not `pbhub`.** The project root is a Node project and
+Android Studio will not recognise it. The Gradle project is the `android`
+subfolder:
+
+```
+D:my appsMOBILE APPSpbhubandroid
+```
+
+Let it finish "Gradle sync" the first time. Then the green Run button builds and
+installs to whichever device is selected in the toolbar.
+
+### Read this before you edit anything in there
+
+**`android/` is generated code.** It is produced by `expo prebuild` from
+`app.json`, it is gitignored, and `npx expo prebuild --clean` deletes and
+recreates the whole folder. Anything you type into `AndroidManifest.xml` or
+`build.gradle` inside Android Studio will be silently thrown away the next time
+that runs.
+
+So when you need a native change — a permission, an app name, a signing config —
+change it in one of these instead, and they survive:
+
+- `app.json` for permissions, icons, the app name, SDK versions
+- `plugins/*.js` for anything `app.json` cannot express
+
+That is why release signing lives in `plugins/withReleaseSigning.js` rather than
+in `build.gradle` where you would normally put it.
+
+### Running a debug build from Android Studio
+
+The Run button installs the app, but a debug build loads its JavaScript from
+Metro, so start that first in a terminal:
+
+```bash
+npm start
+```
+
+Without it the app opens to a blank or red screen saying it cannot connect to the
+development server. `npm run dev` does both steps in one command, which is why
+it is the simpler path day to day.
+
+### Making a second emulator
+
+Android Studio → Device Manager → Add a device. You need two to test the chat —
+see below.
+
 ## Testing the chat needs two devices
 
 This is the part people get stuck on. The app connects **two** phones — one
