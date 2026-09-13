@@ -262,8 +262,44 @@ export default function App() {
   // instant someone taps Allow on the microphone prompt would make calls
   // impossible to answer.
   const foreground = useRef(true);
-  /** Set while a picker, camera or share sheet we launched is on screen. */
-  const leavingOnPurpose = useRef(false);
+  /**
+   * How many things we deliberately left the app for are still outstanding.
+   *
+   * A count rather than a flag, because two can overlap — a permission dialog
+   * in front of a camera — and the inner one finishing must not disarm the
+   * guard while the outer one is still on screen.
+   */
+  const awayOnPurpose = useRef(0);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const leaveOnPurpose = useCallback(() => {
+    if (settleTimer.current) {
+      clearTimeout(settleTimer.current);
+      settleTimer.current = null;
+    }
+    awayOnPurpose.current += 1;
+  }, []);
+
+  /**
+   * Come back — but not the instant the promise says so.
+   *
+   * A picker resolves while its activity is still finishing, so this app is not
+   * on screen yet and a background event can still be in flight behind it.
+   * Dropping the guard at that moment was the race behind "when I add a photo
+   * it comes out": the photo arrived, the guard lifted, the queued background
+   * event landed, and the vault locked and threw you back to the notes.
+   *
+   * A second and a half covers the transition. Being wrong in this direction
+   * means walking away during that window does not lock; being wrong the other
+   * way means losing the vault mid-action, every single time.
+   */
+  const returnedOnPurpose = useCallback(() => {
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(() => {
+      settleTimer.current = null;
+      awayOnPurpose.current = Math.max(0, awayOnPurpose.current - 1);
+    }, 1500);
+  }, []);
 
   /** Armed by the attach sheet, read when the picked photo comes back. A ref
    *  and not state because the picker takes the app out of the foreground and
@@ -275,8 +311,6 @@ export default function App() {
       foreground.current = s === 'active';
       if (s === 'active') {
         clearDot();
-        // Back from the picker or the camera; arm the lock again.
-        leavingOnPurpose.current = false;
         return;
       }
       if (s !== 'background' || !unlocked || !settings.panicOnBackground) return;
@@ -298,7 +332,7 @@ export default function App() {
       // Anything the user deliberately left for, and will be returned from, sets
       // this first. Everything else — the home button, the recents switcher, a
       // call arriving — still locks.
-      if (leavingOnPurpose.current) return;
+      if (awayOnPurpose.current > 0) return;
       lock();
     });
     return () => sub.remove();
@@ -764,7 +798,7 @@ export default function App() {
   ) => {
     let picked;
     try {
-      leavingOnPurpose.current = true;
+      leaveOnPurpose();
       picked = await get();
     } catch (err) {
       Alert.alert(
@@ -775,7 +809,7 @@ export default function App() {
       );
       return;
     } finally {
-      leavingOnPurpose.current = false;
+      returnedOnPurpose();
     }
     if (!picked) return;
 
@@ -879,7 +913,7 @@ export default function App() {
 
   const pickStatusMedia = useCallback(async (kind: 'photo' | 'video') => {
     try {
-      leavingOnPurpose.current = true;
+      leaveOnPurpose();
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) return;
       const res = await ImagePicker.launchImageLibraryAsync({
@@ -912,7 +946,7 @@ export default function App() {
     } catch {
       Alert.alert('Could not use that', 'Something went wrong reading the file.');
     } finally {
-      leavingOnPurpose.current = false;
+      returnedOnPurpose();
     }
   }, [addStatus]);
 
@@ -1075,7 +1109,7 @@ export default function App() {
     if (!connected) return;
     try {
       // The permission dialog takes the app off screen; that must not lock it.
-      leavingOnPurpose.current = true;
+      leaveOnPurpose();
       await peerRef.current?.openMedia(kind);
     } catch {
       Alert.alert(
@@ -1085,6 +1119,10 @@ export default function App() {
           : 'Allow the microphone to make a call.',
       );
       return;
+    } finally {
+      // Without this the guard was raised and never lowered, and the lock
+      // stopped working for the rest of the session after one call.
+      returnedOnPurpose();
     }
     setCall({ kind, state: 'outgoing' });
     setMuted(false);
