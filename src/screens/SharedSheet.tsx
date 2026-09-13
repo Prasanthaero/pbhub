@@ -84,7 +84,7 @@ export default function SharedSheet({
                   ? isText
                     ? 'Goes as a message. Waits for them if they are away.'
                     : 'Goes straight between the phones and is never saved, on either side.'
-                  : 'They need to be in the app — pictures cannot wait anywhere.'}
+                  : 'Waits for them on the relay, sealed, and is deleted once they collect it.'}
               </Text>
             </TouchableOpacity>
 

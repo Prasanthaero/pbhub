@@ -76,7 +76,15 @@ export type VaultSettings = {
   iceServers: any[];
   /** Wipe the conversation the moment the app leaves the foreground. */
   panicOnBackground: boolean;
-  /** Block screenshots and hide the app in the recents switcher. */
+  /**
+   * Block screenshots and hide the app in the recents switcher.
+   *
+   * Off by default now, because it was on and getting in the way: you cannot
+   * screenshot a conversation, screen record it, or show it on anything that
+   * mirrors the display, and that is a real cost for two people who wanted to
+   * keep a picture of something said to them. Still one switch away in Settings
+   * for anyone who would rather the app could not be captured at all.
+   */
   blockScreenshots: boolean;
   /**
    * Keep the conversation on this phone between sessions.
@@ -142,7 +150,7 @@ export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
   relayUrl,
   iceServers: DEFAULT_ICE,
   panicOnBackground: true,
-  blockScreenshots: true,
+  blockScreenshots: false,
   keepHistory: false,
   pairedOnce: false,
   sendReadReceipts: true,

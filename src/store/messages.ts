@@ -103,3 +103,26 @@ export function dropExpired(msgs: Msg[], now = Date.now()): Msg[] {
   const live = msgs.filter((m) => !m.expiresAt || m.expiresAt > now);
   return live.length === msgs.length ? msgs : live;
 }
+
+/**
+ * Put a message where it belongs, rather than on the end.
+ *
+ * The conversation used to be built in arrival order, which is the same thing
+ * as sent order right up until it is not: a message re-sent after a
+ * reconnection, or a backlog collected from the relay, arrives now but was
+ * written hours ago. On the end, it sits under today's messages wearing
+ * yesterday's timestamp.
+ *
+ * Sorting by when it was sent fixes that. The sort is stable, so two messages
+ * sharing a millisecond keep the order they were added in.
+ */
+export function place(msgs: Msg[], next: Msg): Msg[] {
+  // The common case by far: it really does belong on the end.
+  if (!msgs.length || next.at >= msgs[msgs.length - 1].at) return [...msgs, next];
+  return [...msgs, next].sort((a, b) => a.at - b.at);
+}
+
+/** The same, for a handful arriving together. */
+export function placeAll(msgs: Msg[], next: Msg[]): Msg[] {
+  return next.reduce(place, msgs);
+}

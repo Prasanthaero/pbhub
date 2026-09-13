@@ -191,7 +191,12 @@ export default function VaultSettingsScreen({
         <View style={s.rowItem}>
           <View style={{ flex: 1, paddingRight: 12 }}>
             <Text style={s.rowTitle}>Block screenshots</Text>
-            <Text style={s.rowSub}>Also hides the vault from the app switcher preview.</Text>
+            <Text style={s.rowSub}>
+              Off, you can screenshot and screen record the chat like anything else. On, Android
+              refuses both, and the app shows as a blank square in the recent-apps preview — which
+              hides the conversation from anyone thumbing through your open apps, and also means
+              you cannot keep a picture of anything in it.
+            </Text>
           </View>
           <Switch value={block} onValueChange={setBlock} />
         </View>

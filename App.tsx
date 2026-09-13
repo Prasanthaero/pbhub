@@ -16,7 +16,7 @@ import {
 } from './src/store/vaultStore';
 import { loadNotes, saveNotes, newNote, type Note } from './src/store/notes';
 import {
-  mkMsg, newId, dropExpired, type Msg, type MediaKind,
+  mkMsg, newId, dropExpired, place, type Msg, type MediaKind,
 } from './src/store/messages';
 import { loadHistory, saveHistory, clearHistory } from './src/store/history';
 import { loadOutbox, saveOutbox, clearOutbox, type Pending } from './src/store/outbox';
@@ -37,6 +37,7 @@ import {
   readSharedFile, toStatusImage, kindForMime, type SharedItem,
 } from './src/media/shared';
 import * as ImagePicker from 'expo-image-picker';
+import { useShareIntent } from './src/media/shareIntent';
 
 import NotesList from './src/screens/NotesList';
 import NoteEditor from './src/screens/NoteEditor';
@@ -124,12 +125,69 @@ export default function App() {
 
   /** Something handed to us by another app's share sheet, waiting for a home. */
   const [shared, setShared] = useState<SharedItem | null>(null);
+  /** Readable from enterVault, which runs before the next render. */
+  const sharedRef = useRef<SharedItem | null>(null);
+  sharedRef.current = shared;
   const [sharedBusy, setSharedBusy] = useState(false);
 
   useEffect(() => {
     loadNotes().then(setNotes);
     readMarker().then((m) => setHasVault(!!m));
   }, []);
+
+  /**
+   * Something shared into the app from Instagram, the gallery, a browser.
+   *
+   * The screen for this and the code that sends it were both written; nothing
+   * ever connected Android's share sheet to them, so the app appeared in the
+   * share menu and then did nothing with what it was handed.
+   *
+   * The bytes are read immediately, before anything is asked of the user: the
+   * content:// URI a share hands over is borrowed, and the app that lent it can
+   * take it back the moment its sheet closes — which is exactly while someone
+   * is unlocking and deciding what to do with it.
+   */
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent({
+    // Keep it across the trip to the lock screen and back.
+    resetOnBackground: false,
+  });
+
+  useEffect(() => {
+    if (!hasShareIntent) return;
+
+    (async () => {
+      try {
+        const file = shareIntent.files?.[0];
+        if (file?.path) {
+          const mime = file.mimeType || 'image/jpeg';
+          const kind = kindForMime(mime);
+          const { bytes } = await readSharedFile(file.path, mime);
+          setShared({
+            kind,
+            uri: file.path,
+            mime,
+            bytes,
+            text: shareIntent.text ?? undefined,
+            duration: file.duration ? file.duration / 1000 : undefined,
+          });
+        } else {
+          const text = shareIntent.text || shareIntent.webUrl;
+          if (!text) return;
+          setShared({ kind: 'text', text });
+        }
+        // Unlocked already: straight to the sheet. Locked: the PIN first, and
+        // the share is still here on the other side of it.
+        setScreen(keysRef.current ? 'shared' : 'gate');
+      } catch {
+        Alert.alert(
+          'Could not use that',
+          'The app that shared it may have already taken it back.',
+        );
+      } finally {
+        resetShareIntent();
+      }
+    })();
+  }, [hasShareIntent, shareIntent, resetShareIntent]);
 
   /**
    * Seal and open envelopes without needing a peer connection.
@@ -183,7 +241,7 @@ export default function App() {
   }, [call]);
 
   const pushSystem = useCallback((body: string) => {
-    setMessages((m) => [...m, mkMsg('system', body)]);
+    setMessages((m) => place(m, mkMsg('system', body)));
   }, []);
 
   // ---- persistence -------------------------------------------------------
@@ -360,9 +418,9 @@ export default function App() {
         if (seenRef.current.has(e.id)) return; // arrived twice; show it once
         seenRef.current.add(e.id);
         setMessages((m) => {
-          const next = [...m, {
+          const next = place(m, {
             id: e.id, kind: 'in' as const, body: e.body, at: e.at || at, expiresAt: e.exp,
-          }];
+          });
           persistHistory(next);
           return next;
         });
@@ -389,20 +447,21 @@ export default function App() {
       case 'media-whole': {
         if (seenRef.current.has(e.id)) return;
         seenRef.current.add(e.id);
-        setMessages((m) => [
-          ...m,
-          {
-            id: e.id, kind: 'in', body: '', at: e.at || at,
-            expiresAt: e.exp, viewOnce: e.once,
-            media: {
-              kind: e.kind,
-              uri: `data:${e.mime};base64,${e.b64}`,
-              mime: e.mime,
-              bytes: e.bytes,
-              duration: e.duration,
-            },
+        setMessages((m) => place(m, {
+          id: e.id,
+          kind: 'in',
+          body: '',
+          at: e.at || at,
+          expiresAt: e.exp,
+          viewOnce: e.once,
+          media: {
+            kind: e.kind,
+            uri: `data:${e.mime};base64,${e.b64}`,
+            mime: e.mime,
+            bytes: e.bytes,
+            duration: e.duration,
           },
-        ]);
+        }));
         if (!peerRef.current?.send({ k: 'ack', id: e.id })) sigRef.current?.ack(e.id);
         if (!foreground.current && settingsRef.current.quietNotifications) showDot();
         return;
@@ -484,9 +543,7 @@ export default function App() {
     if (!wire) return;
 
     setMessages((m) => {
-      const next: Msg[] = [
-        ...m, { id, kind: 'out', body, at, delivery: 'sending', expiresAt },
-      ];
+      const next: Msg[] = place(m, { id, kind: 'out', body, at, delivery: 'sending', expiresAt });
       persistHistory(next);
       return next;
     });
@@ -540,19 +597,16 @@ export default function App() {
       onMedia: (id, kind, uri, mime, bytes, at, duration, exp, once) => {
         if (seenRef.current.has(id)) return;
         seenRef.current.add(id);
-        setMessages((m) => [
-          ...m.filter((x) => x.id !== id),
-          {
-            id, kind: 'in', body: '', at, expiresAt: exp, viewOnce: once,
-            media: { kind, uri, mime, bytes, duration },
-          },
-        ]);
+        setMessages((m) => place(m.filter((x) => x.id !== id), {
+          id, kind: 'in', body: '', at, expiresAt: exp, viewOnce: once,
+          media: { kind, uri, mime, bytes, duration },
+        }));
       },
       onMediaProgress: (id, progress) => {
         setMessages((m) =>
           m.some((x) => x.id === id)
             ? m.map((x) => (x.id === id ? { ...x, progress } : x))
-            : [...m, { id, kind: 'in' as const, body: '', at: Date.now(), progress }],
+            : place(m, { id, kind: 'in' as const, body: '', at: Date.now(), progress }),
         );
       },
       onStatusMedia: (statusId, uri) => {
@@ -651,7 +705,9 @@ export default function App() {
     if (cfg.quietNotifications) prepareNotifications();
 
     setUnlocked(true);
-    setScreen('chat');
+    // Unlocked because something was shared in and the app was locked: go to
+    // what to do with it, not past it into the conversation.
+    setScreen(sharedRef.current ? 'shared' : 'chat');
     connect(keys, cfg);
   }, [connect]);
 
@@ -757,7 +813,7 @@ export default function App() {
           id, kind: 'out', body: '', at, delivery, progress, expiresAt, viewOnce: once,
           media: { kind, uri, mime, bytes, duration },
         };
-        return existing ? m.map((x) => (x.id === id ? row : x)) : [...m, row];
+        return existing ? m.map((x) => (x.id === id ? row : x)) : place(m, row);
       });
 
     // --- they are here: stream it ---
