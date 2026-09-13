@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { T } from '../theme';
 import { RELAY_EXAMPLE } from '../store/vaultStore';
+import { generatePhrase, phraseBits } from '../crypto/wordlist';
 
 type Props = {
   mode: 'setup' | 'unlock';
@@ -20,6 +21,17 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
   const [relay, setRelay] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // Shown in the clear while setting up, because both people have to copy it
+  // onto the other phone. It is never displayed again after this screen.
+  const [suggested, setSuggested] = useState('');
+
+  const suggest = () => {
+    const p = generatePhrase();
+    setSuggested(p);
+    setP1(p);
+    setP2(p);
+    setErr('');
+  };
 
   const go = async () => {
     setErr('');
@@ -67,10 +79,29 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
             </Text>
           )}
 
+          {mode === 'setup' && (
+            <>
+              <TouchableOpacity style={s.suggestBtn} onPress={suggest}>
+                <Text style={s.suggestText}>
+                  {suggested ? 'Give me another' : 'Make one up for us'}
+                </Text>
+              </TouchableOpacity>
+              {!!suggested && (
+                <View style={s.suggestBox}>
+                  <Text style={s.suggestPhrase}>{suggested}</Text>
+                  <Text style={s.suggestNote}>
+                    Write this down somewhere safe and type it into the other phone.
+                    {' '}{phraseBits()} bits of randomness — nothing about you, nothing guessable.
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
+
           <TextInput
             style={s.input}
             value={p1}
-            onChangeText={setP1}
+            onChangeText={(t) => { setP1(t); setSuggested(''); }}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
@@ -84,7 +115,7 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
               <TextInput
                 style={s.input}
                 value={p2}
-                onChangeText={setP2}
+                onChangeText={(t) => { setP2(t); setSuggested(''); }}
                 secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -148,4 +179,17 @@ const s = StyleSheet.create({
   },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   note: { color: T.vaultInkSoft, fontSize: 13, marginTop: 20, lineHeight: 19 },
+  suggestBtn: {
+    borderWidth: 1, borderColor: T.vaultLine, borderRadius: 12,
+    paddingVertical: 13, alignItems: 'center', marginBottom: 12,
+  },
+  suggestText: { color: T.accent, fontSize: 15, fontWeight: '600' },
+  suggestBox: {
+    backgroundColor: T.vaultCard, borderRadius: 12, padding: 16, marginBottom: 16,
+    borderWidth: 1, borderColor: T.accent,
+  },
+  suggestPhrase: {
+    color: T.vaultInk, fontSize: 19, fontWeight: '600', lineHeight: 27, letterSpacing: 0.3,
+  },
+  suggestNote: { color: T.vaultInkSoft, fontSize: 12.5, marginTop: 10, lineHeight: 18 },
 });

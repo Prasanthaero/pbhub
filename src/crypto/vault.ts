@@ -25,13 +25,32 @@
  * precomputation; "iloveyou2" is not, salt or no salt.
  */
 import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
-import { sha512, sha256 } from '@noble/hashes/sha2.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { utf8ToBytes, bytesToUtf8, bytesToHex, hexToBytes } from '@noble/ciphers/utils.js';
 import { randomBytes } from './random';
 
-const PBKDF2_ROUNDS = 250_000;
+/**
+ * Measured on the device, not guessed from a desktop benchmark.
+ *
+ * This runs in Hermes, which has no JIT. The first version used
+ * PBKDF2-HMAC-SHA512 at 250,000 rounds: about half a second on a laptop and
+ * over a MINUTE on a phone, because SHA-512 needs 64-bit arithmetic that Hermes
+ * emulates with pairs of 32-bit operations. SHA-256 uses 32-bit words
+ * throughout and measured 5.3s for 120,000 rounds on the same device —
+ * roughly 0.044ms per round.
+ *
+ * 40,000 rounds is therefore about 1.8s: long enough to be a real cost to
+ * anyone guessing, short enough that unlocking does not feel broken.
+ *
+ * That is far below what you would use for a password database, and the reason
+ * is that stretching is the wrong lever here. With a constant salt (see above)
+ * the attacker precomputes once regardless, so the defence has to be entropy in
+ * the phrase itself — which is why setup can generate one. Seven random words
+ * is 56 bits; no round count rescues a phrase the user invented.
+ */
+const PBKDF2_ROUNDS = 40_000;
 const MARKER_PLAINTEXT = 'pbhub.vault.v1';
 
 /** Constant by necessity — see the note above. */
@@ -61,10 +80,15 @@ const fromUtf8 = bytesToUtf8;
 
 /** Slow, deliberately. Only ever runs on an explicit submit, behind a spinner. */
 function stretch(passphrase: string): Uint8Array {
-  return pbkdf2(sha512, utf8(passphrase.normalize('NFKC').trim()), PAIRING_SALT, {
+  const t0 = Date.now();
+  const out = pbkdf2(sha256, utf8(passphrase.normalize('NFKC').trim()), PAIRING_SALT, {
     c: PBKDF2_ROUNDS,
     dkLen: 32,
   });
+  // Duration only — never the phrase or the key. Lets the round count be tuned
+  // against a real device instead of a desktop guess.
+  console.log(`[kdf] ${PBKDF2_ROUNDS} rounds in ${Date.now() - t0}ms`);
+  return out;
 }
 
 function subkey(master: Uint8Array, label: string, len = 32): Uint8Array {
