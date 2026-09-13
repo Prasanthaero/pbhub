@@ -62,6 +62,15 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
     }
 
     if (pin.trim().length < 4) return setErr('The PIN needs at least 4 characters.');
+    // No spaces. The way in is typing the PIN as one word in a note, and that
+    // route deliberately ignores anything with a space in it so that writing an
+    // ordinary note does not pause for two seconds. Accepting a PIN here that
+    // the note route could never carry would lock someone out of their own
+    // vault, and they would have no way to work out why.
+    if (/s/.test(pin.trim())) {
+      return setErr('No spaces in the PIN — you type it as one word into a note.');
+    }
+    if (pin.trim().length > 64) return setErr('That PIN is too long to type into a note.');
     if (pin !== pin2) return setErr('The two PINs do not match.');
 
     const secret = wordsToBytes(pairing);

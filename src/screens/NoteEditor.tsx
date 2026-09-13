@@ -58,22 +58,20 @@ export default function NoteEditor({ note, isNew, tryUnlock, onSave, onDelete, o
       if (await tryUnlock(candidate)) return;
 
       /**
-       * Wrong PIN. Discard it rather than saving it.
+       * Wrong PIN. Never written down, and never thrown away either.
        *
-       * This used to fall through and save, on the theory that a failed attempt
-       * indistinguishable from an ordinary note was good deniability. In
-       * practice it was the opposite: mistype your PIN once and it sits in the
-       * notes list in plain text, one character away from the real one, for
-       * anyone who picks up the phone to read and try. The deniability was
-       * theoretical; the leak was not.
+       * It must not be saved: mistype your PIN once and it would sit in the
+       * notes list in plain text, one character from the real one, for anyone
+       * who picks up the phone to read and try.
        *
-       * Nothing is written and nothing is said — the same silence as a wrong
-       * PIN anywhere else. The cost is that a genuine one-word note needs a
-       * title or a second word, which is a small thing to ask and is stated in
-       * the placeholder below.
+       * But it used to also close the editor, which made the typing vanish with
+       * no explanation — indistinguishable from the app simply not working,
+       * which is exactly how it was reported. Staying put with the text still on
+       * screen lets the owner see what they typed and fix it, and says nothing
+       * at all to anyone who does not already know there is something to fix.
        */
       setChecking(false);
-      return onCancel();
+      return;
     }
     if (!title.trim() && !body.trim()) return onCancel();
     onSave({ ...note, title: title.trim(), body, updatedAt: Date.now() });
@@ -122,7 +120,7 @@ export default function NoteEditor({ note, isNew, tryUnlock, onSave, onDelete, o
         />
         {looksLikeAttempt && (
           <Text style={s.hint}>
-            One word on its own is not kept — add a title or a second word to save it as a note.
+            A single word is not saved as a note. Add a title or a second word to keep it.
           </Text>
         )}
       </KeyboardAvoidingView>
