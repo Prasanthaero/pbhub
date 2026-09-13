@@ -59,14 +59,30 @@
           "android": {
             "minSdkVersion": 24,
             "enableProguardInReleaseBuilds": true,
-            "usesCleartextTraffic": false
+            "usesCleartextTraffic": false,
+            "asyncStorageDatabaseSize": 20
           }
         }
       ],
       "./plugins/withReleaseSigning",
       "./plugins/withDebugCleartext",
       "expo-audio",
-      "expo-video"
-    ]
+      "expo-video",
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": [
+            "text/*",
+            "image/*",
+            "video/*"
+          ],
+          "androidMultiIntentFilters": [
+            "image/*",
+            "video/*"
+          ]
+        }
+      ]
+    ],
+    "scheme": "notes"
   }
 }

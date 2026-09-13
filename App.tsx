@@ -15,11 +15,18 @@ import { loadNotes, saveNotes, newNote, type Note } from './src/store/notes';
 import { mkMsg, newId, type Msg, type MediaKind } from './src/store/messages';
 import { loadHistory, saveHistory, clearHistory } from './src/store/history';
 import { loadOutbox, saveOutbox, clearOutbox, type Pending } from './src/store/outbox';
-import { loadStatus, saveStatus, clearStatus, isLive, type Status } from './src/store/status';
+import {
+  loadStatus, saveStatus, clearStatus, isLive, type Status, type StatusImage,
+} from './src/store/status';
 import { Signaling, type Role } from './src/net/signaling';
 import { Peer, type CallKind } from './src/net/peer';
 import type { Envelope } from './src/net/transport';
 import { pickPhoto, pickVideo, readRecording, TooLarge } from './src/media/pick';
+import {
+  readSharedFile, toStatusImage, kindForMime, type SharedItem,
+} from './src/media/shared';
+import { useShareIntent } from 'expo-share-intent';
+import * as ImagePicker from 'expo-image-picker';
 
 import NotesList from './src/screens/NotesList';
 import NoteEditor from './src/screens/NoteEditor';
@@ -27,8 +34,9 @@ import VaultGate from './src/screens/VaultGate';
 import Chat from './src/screens/Chat';
 import CallScreen, { type CallState } from './src/screens/Call';
 import VaultSettingsScreen from './src/screens/VaultSettings';
+import SharedSheet from './src/screens/SharedSheet';
 
-type Screen = 'list' | 'editor' | 'gate' | 'chat' | 'call' | 'settings';
+type Screen = 'list' | 'editor' | 'gate' | 'chat' | 'call' | 'settings' | 'shared';
 type CallInfo = { kind: CallKind; state: CallState };
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -83,6 +91,10 @@ export default function App() {
   const [cameraOff, setCameraOff] = useState(false);
   const [sending, setSending] = useState<{ id: string; progress: number } | null>(null);
 
+  /** Something handed to us by another app's share sheet, waiting for a home. */
+  const [shared, setShared] = useState<SharedItem | null>(null);
+  const [sharedBusy, setSharedBusy] = useState(false);
+
   useEffect(() => {
     loadNotes().then(setNotes);
     readMarker().then((m) => setHasVault(!!m));
@@ -124,6 +136,8 @@ export default function App() {
     setConnected(false);
     setRelayUp(false);
     setSending(null);
+    setShared(null);
+    setSharedBusy(false);
     setMyStatus(null);
     setTheirStatus(null);
     setStatus('Offline');
@@ -182,7 +196,9 @@ export default function App() {
         return;
       }
       case 'status':
-        setTheirStatus({ text: e.text, at: e.at, expiresAt: e.expiresAt });
+        setTheirStatus({
+          text: e.text, at: e.at, expiresAt: e.expiresAt, image: e.image, source: e.source,
+        });
         return;
       case 'status-clear':
         setTheirStatus(null);
@@ -260,7 +276,10 @@ export default function App() {
         flushOutbox();
         const mine = myStatusRef.current;
         if (isLive(mine)) {
-          peer.send({ k: 'status', text: mine.text, at: mine.at, expiresAt: mine.expiresAt });
+          peer.send({
+            k: 'status', text: mine.text, at: mine.at, expiresAt: mine.expiresAt,
+            image: mine.image, source: mine.source,
+          });
         }
       },
       onEnvelope: (e) => applyEnvelope(e),
@@ -419,12 +438,47 @@ export default function App() {
    * queueing pictures on someone else's server is exactly what this app exists
    * to avoid — so if the partner is not here, we say so rather than storing it.
    */
+  /** Push already-read bytes across, showing progress as it goes. */
+  const shipMediaBytes = useCallback(async (
+    kind: MediaKind,
+    b64: string,
+    mime: string,
+    bytes: number,
+    duration?: number,
+  ) => {
+    const peer = peerRef.current;
+    if (!peer?.isOpen) return false;
+
+    const id = newId();
+    const at = Date.now();
+    setMessages((m) => [
+      ...m,
+      {
+        id, kind: 'out', body: '', at, delivery: 'sending', progress: 0,
+        media: { kind, uri: `data:${mime};base64,${b64}`, mime, bytes, duration },
+      },
+    ]);
+    setSending({ id, progress: 0 });
+
+    const ok = await peer.sendMedia(id, kind, b64, mime, bytes, duration, (p) => {
+      setSending({ id, progress: p });
+      setMessages((m) => m.map((x) => (x.id === id ? { ...x, progress: p } : x)));
+    });
+
+    setSending(null);
+    setMessages((m) =>
+      m.map((x) =>
+        x.id === id ? { ...x, progress: undefined, delivery: ok ? 'delivered' : 'failed' } : x,
+      ),
+    );
+    return ok;
+  }, []);
+
   const shipMedia = useCallback(async (
     kind: MediaKind,
     get: () => Promise<{ b64: string; mime: string; bytes: number; duration?: number } | null>,
   ) => {
-    const peer = peerRef.current;
-    if (!peer?.isOpen) {
+    if (!peerRef.current?.isOpen) {
       Alert.alert(
         'Not connected',
         'Photos, video and voice notes go straight between the phones, so you both need to be in the app. Text can wait for them; pictures cannot.',
@@ -446,47 +500,131 @@ export default function App() {
     }
     if (!picked) return;
 
-    const id = newId();
-    const at = Date.now();
-    const uri = `data:${picked.mime};base64,${picked.b64}`;
-    setMessages((m) => [
-      ...m,
-      {
-        id, kind: 'out', body: '', at, delivery: 'sending', progress: 0,
-        media: {
-          kind, uri, mime: picked.mime, bytes: picked.bytes, duration: picked.duration,
-        },
-      },
-    ]);
-    setSending({ id, progress: 0 });
-
-    const ok = await peer.sendMedia(
-      id, kind, picked.b64, picked.mime, picked.bytes, picked.duration,
-      (p) => {
-        setSending({ id, progress: p });
-        setMessages((m) => m.map((x) => (x.id === id ? { ...x, progress: p } : x)));
-      },
-    );
-
-    setSending(null);
-    setMessages((m) =>
-      m.map((x) =>
-        x.id === id ? { ...x, progress: undefined, delivery: ok ? 'delivered' : 'failed' } : x,
-      ),
-    );
-  }, []);
+    await shipMediaBytes(kind, picked.b64, picked.mime, picked.bytes, picked.duration);
+  }, [shipMediaBytes]);
 
   // ---- status ------------------------------------------------------------
-  const updateStatus = useCallback(async (text: string) => {
+  const updateStatus = useCallback(async (
+    text: string,
+    image?: StatusImage,
+    source?: string,
+  ) => {
     const keys = keysRef.current;
     if (!keys) return;
-    const s = await saveStatus(keys.msgKey, text);
+    const s = await saveStatus(keys.msgKey, text, image, source);
     setMyStatus(s);
     myStatusRef.current = s;
     peerRef.current?.send(
-      s ? { k: 'status', text: s.text, at: s.at, expiresAt: s.expiresAt } : { k: 'status-clear' },
+      s
+        ? {
+            k: 'status', text: s.text, at: s.at, expiresAt: s.expiresAt,
+            image: s.image, source: s.source,
+          }
+        : { k: 'status-clear' },
     );
   }, []);
+
+  // ---- shared from another app -------------------------------------------
+  /**
+   * Whatever Instagram, Facebook, the gallery or a browser just handed us.
+   *
+   * The bytes are read immediately rather than on the user's next tap: the
+   * content:// URI in a share is borrowed, and the permission behind it is
+   * routinely gone by the time someone has unlocked and made up their mind.
+   */
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent({
+    resetOnBackground: false,
+  });
+
+  useEffect(() => {
+    if (!hasShareIntent || !shareIntent) return;
+
+    const take = async () => {
+      const file = shareIntent.files?.[0];
+      const caption = shareIntent.text ?? shareIntent.webUrl ?? undefined;
+
+      if (!file) {
+        if (!caption) return resetShareIntent();
+        setShared({ kind: 'text', text: caption });
+      } else {
+        const mime = file.mimeType || 'image/jpeg';
+        setShared({
+          kind: kindForMime(mime),
+          text: caption,
+          uri: file.path,
+          mime,
+          bytes: file.size ?? undefined,
+          duration: file.duration ?? undefined,
+        });
+      }
+      resetShareIntent();
+      // Locked? Leave them at the notes list; the sheet is shown once they are
+      // in. Nothing about the share is visible until then.
+      setScreen((s) => (keysRef.current ? 'shared' : s));
+    };
+
+    take();
+  }, [hasShareIntent, shareIntent, resetShareIntent]);
+
+  // A share that arrived while locked surfaces the moment the vault opens.
+  useEffect(() => {
+    if (unlocked && shared && screen === 'chat') setScreen('shared');
+  }, [unlocked, shared, screen]);
+
+  const sendShared = useCallback(async () => {
+    const item = shared;
+    if (!item) return;
+    setSharedBusy(true);
+    try {
+      if (item.kind === 'text') {
+        sendText(item.text ?? '');
+      } else if (item.uri && item.mime) {
+        const { b64, bytes } = await readSharedFile(item.uri, item.mime);
+        await shipMediaBytes(item.kind, b64, item.mime, bytes, item.duration);
+        // A caption travels as its own message, so it survives even if the
+        // picture does not.
+        if (item.text) sendText(item.text);
+      }
+    } catch {
+      Alert.alert('Could not send that', 'The file may be too large, or the app that shared it has already taken it back.');
+    }
+    setSharedBusy(false);
+    setShared(null);
+    setScreen('chat');
+  }, [shared, sendText, shipMediaBytes]);
+
+  const shareToStatus = useCallback(async () => {
+    const item = shared;
+    if (!item) return;
+    setSharedBusy(true);
+    try {
+      // Video makes a poor status and a worse thing to store; keep the words.
+      const image = item.kind === 'photo' && item.uri ? await toStatusImage(item.uri) : undefined;
+      await updateStatus(item.text ?? '', image, item.kind === 'text' ? undefined : 'shared');
+    } catch {
+      Alert.alert('Could not use that', 'The app that shared it may have already taken it back.');
+    }
+    setSharedBusy(false);
+    setShared(null);
+    setScreen('chat');
+  }, [shared, updateStatus]);
+
+  const pickStatusPhoto = useCallback(async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return;
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 1,
+        exif: false, // no location, no camera serial
+      });
+      if (res.canceled || !res.assets?.length) return;
+      const image = await toStatusImage(res.assets[0].uri);
+      await updateStatus(myStatusRef.current?.text ?? '', image);
+    } catch {
+      Alert.alert('Could not use that', 'Something went wrong reading the picture.');
+    }
+  }, [updateStatus]);
 
   // ---- calls -------------------------------------------------------------
   const startCall = (kind: CallKind) => {
@@ -601,6 +739,19 @@ export default function App() {
       );
     }
 
+    if (screen === 'shared' && unlocked && shared) {
+      return (
+        <SharedSheet
+          item={shared}
+          connected={connected}
+          busy={sharedBusy}
+          onSend={sendShared}
+          onSetStatus={shareToStatus}
+          onDiscard={() => { setShared(null); setScreen('chat'); }}
+        />
+      );
+    }
+
     if (screen === 'chat' && unlocked) {
       return (
         <Chat
@@ -614,6 +765,7 @@ export default function App() {
           sending={sending}
           onSend={sendText}
           onSetStatus={updateStatus}
+          onPickStatusPhoto={pickStatusPhoto}
           onPickPhoto={(camera) => shipMedia('photo', () => pickPhoto(camera))}
           onPickVideo={(camera) => shipMedia('video', () => pickVideo(camera))}
           onSendRecording={(uri, seconds) => shipMedia('audio', () => readRecording(uri, seconds))}

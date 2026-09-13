@@ -31,7 +31,15 @@ export type Envelope =
   | { k: 'msg'; id: string; body: string; at: number }
   | { k: 'ack'; id: string }
   | { k: 'call'; action: 'ring' | 'accept' | 'decline' | 'hangup'; callKind?: 'audio' | 'video' }
-  | { k: 'status'; text: string; at: number; expiresAt: number }
+  | {
+      k: 'status';
+      text: string;
+      at: number;
+      expiresAt: number;
+      /** Already downscaled by the sender; a status picture is small. */
+      image?: { uri: string; mime: string; bytes: number };
+      source?: string;
+    }
   | { k: 'status-clear' }
   | {
       k: 'media-start';

@@ -8,7 +8,9 @@ import { useAudioRecorder, useAudioPlayer, RecordingPresets, setAudioModeAsync, 
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { T } from '../theme';
 import type { Msg } from '../store/messages';
-import { STATUS_MAX_CHARS, timeLeft, isLive, type Status } from '../store/status';
+import {
+  STATUS_MAX_CHARS, timeLeft, isLive, type Status, type StatusImage,
+} from '../store/status';
 
 type Props = {
   messages: Msg[];
@@ -20,7 +22,9 @@ type Props = {
   theirStatus: Status | null;
   sending: { id: string; progress: number } | null;
   onSend: (text: string) => void;
-  onSetStatus: (text: string) => void;
+  onSetStatus: (text: string, image?: StatusImage, source?: string) => void;
+  /** Pick a photo for the status, downscaled by the caller. */
+  onPickStatusPhoto: () => void;
   onPickPhoto: (fromCamera: boolean) => void;
   onPickVideo: (fromCamera: boolean) => void;
   onSendRecording: (uri: string, seconds: number) => void;
@@ -85,7 +89,7 @@ function AudioBubble({ uri, duration, mine }: { uri: string; duration?: number; 
 
 export default function Chat({
   messages, status, connected, relayUp, keepHistory, myStatus, theirStatus, sending,
-  onSend, onSetStatus, onPickPhoto, onPickVideo, onSendRecording,
+  onSend, onSetStatus, onPickStatusPhoto, onPickPhoto, onPickVideo, onSendRecording,
   onCall, onLock, onSettings,
 }: Props) {
   const [draft, setDraft] = useState('');
@@ -95,6 +99,7 @@ export default function Chat({
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [viewing, setViewing] = useState<Msg | null>(null);
+  const [statusView, setStatusView] = useState<Status | null>(null);
 
   const listRef = useRef<FlatList<Msg>>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -151,7 +156,8 @@ export default function Chat({
   };
 
   const saveStatus = () => {
-    onSetStatus(statusDraft);
+    // Editing the words must not silently drop the picture.
+    onSetStatus(statusDraft, myStatus?.image, myStatus?.source);
     setStatusOpen(false);
   };
 
@@ -186,16 +192,27 @@ export default function Chat({
 
       {/* Status strip: theirs on the left, yours tappable on the right. */}
       <View style={s.statusBar}>
-        <View style={{ flex: 1 }}>
-          {isLive(theirStatus) ? (
-            <>
-              <Text style={s.theirStatus} numberOfLines={2}>{theirStatus.text}</Text>
+        {isLive(theirStatus) ? (
+          <TouchableOpacity
+            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+            activeOpacity={0.8}
+            onPress={() => theirStatus.image && setStatusView(theirStatus)}
+          >
+            {!!theirStatus.image && (
+              <Image source={{ uri: theirStatus.image.uri }} style={s.statusThumb} />
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={s.theirStatus} numberOfLines={2}>
+                {theirStatus.text || 'Shared a picture'}
+              </Text>
               <Text style={s.statusMeta}>{timeLeft(theirStatus)}</Text>
-            </>
-          ) : (
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ flex: 1 }}>
             <Text style={s.noStatus}>No status from them</Text>
-          )}
-        </View>
+          </View>
+        )}
         <TouchableOpacity style={s.statusBtn} onPress={openStatus}>
           <Text style={s.statusBtnText}>
             {isLive(myStatus) ? 'Your status' : 'Set status'}
@@ -344,6 +361,17 @@ export default function Chat({
               Saved on this phone only, encrypted, and sent to your partner when you are both
               here. It disappears by itself after a day.
             </Text>
+            {!!myStatus?.image && (
+              <Image source={{ uri: myStatus.image.uri }} style={s.statusPreview} />
+            )}
+            <TouchableOpacity
+              style={s.statusPhotoBtn}
+              onPress={() => { setStatusOpen(false); onPickStatusPhoto(); }}
+            >
+              <Text style={s.statusPhotoText}>
+                {myStatus?.image ? 'Change the picture' : 'Add a picture'}
+              </Text>
+            </TouchableOpacity>
             <TextInput
               style={s.statusInput}
               value={statusDraft}
@@ -357,7 +385,7 @@ export default function Chat({
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity
                 style={[s.statusAction, { borderColor: T.vaultLine }]}
-                onPress={() => { setStatusDraft(''); onSetStatus(''); setStatusOpen(false); }}
+                onPress={() => { setStatusDraft(''); onSetStatus('', undefined); setStatusOpen(false); }}
               >
                 <Text style={{ color: T.vaultInkSoft, fontWeight: '600' }}>Clear</Text>
               </TouchableOpacity>
@@ -373,6 +401,19 @@ export default function Chat({
             </TouchableOpacity>
           </View>
         </View>
+      </Modal>
+
+      {/* Full-screen status */}
+      <Modal visible={!!statusView} transparent animationType="fade" onRequestClose={() => setStatusView(null)}>
+        <TouchableOpacity style={s.viewer} activeOpacity={1} onPress={() => setStatusView(null)}>
+          {statusView?.image && (
+            <Image source={{ uri: statusView.image.uri }} style={s.viewerImage} resizeMode="contain" />
+          )}
+          {!!statusView?.text && <Text style={s.statusCaption}>{statusView.text}</Text>}
+          <Text style={s.viewerHint}>
+            {statusView ? timeLeft(statusView) : ''} · tap to close
+          </Text>
+        </TouchableOpacity>
       </Modal>
 
       {/* Full-screen photo */}
@@ -505,6 +546,18 @@ const s = StyleSheet.create({
     flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center',
   },
 
+  statusThumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: '#000' },
+  statusPreview: {
+    width: '100%', height: 160, borderRadius: 12, backgroundColor: '#000', marginBottom: 12,
+  },
+  statusPhotoBtn: {
+    borderWidth: 1, borderColor: T.vaultLine, borderRadius: 10,
+    paddingVertical: 11, alignItems: 'center', marginBottom: 12,
+  },
+  statusPhotoText: { color: T.accent, fontSize: 14, fontWeight: '600' },
+  statusCaption: {
+    color: '#fff', fontSize: 16, textAlign: 'center', paddingHorizontal: 28, marginTop: 16,
+  },
   viewer: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   viewerImage: { width: '100%', height: '85%' },
   viewerHint: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 12 },
