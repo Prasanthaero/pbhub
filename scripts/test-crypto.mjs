@@ -103,4 +103,48 @@ ok('tampering is rejected by the AEAD tag');
 assert.throws(() => unseal(other.keys.msgKey, sealed));
 ok('an eavesdropper in a different room cannot open the payload');
 
-console.log(`\n${pass} checks passed`);
+// ---------------------------------------------------------------------------
+// Base64 — written by hand because Hermes ships neither atob/btoa nor Buffer
+// reliably, and it now carries megabyte-sized status media.
+// ---------------------------------------------------------------------------
+const { bytesToBase64, base64ToBytes, decodedLength } = await import('../src/crypto/base64.ts');
+const { sealBytes, unsealBytes } = await import('../src/crypto/vault.ts');
+
+console.log('');
+console.log('base64');
+for (const n of [0, 1, 2, 3, 4, 5, 6, 7, 100, 255, 1024]) {
+  const bytes = new Uint8Array(n);
+  for (let i = 0; i < n; i++) bytes[i] = (i * 37 + 11) & 0xff;
+  const b64 = bytesToBase64(bytes);
+  assert.equal(b64, Buffer.from(bytes).toString('base64'), `length ${n} encodes wrong`);
+  assert.equal(hex(base64ToBytes(b64)), hex(bytes), `length ${n} round-trips wrong`);
+  assert.equal(decodedLength(b64), n, `length ${n} reports the wrong size`);
+}
+ok('matches a known-good encoder at every padding case, and round-trips');
+
+// Every byte value, since a video is not ASCII.
+const allBytes = new Uint8Array(256);
+for (let i = 0; i < 256; i++) allBytes[i] = i;
+assert.equal(hex(base64ToBytes(bytesToBase64(allBytes))), hex(allBytes));
+ok('survives all 256 byte values');
+
+// Larger than one turn of the encoder's inner loop.
+const big = new Uint8Array(300_000);
+for (let i = 0; i < big.length; i++) big[i] = (i * 101) & 0xff;
+const bigB64 = bytesToBase64(big);
+assert.equal(bigB64, Buffer.from(big).toString('base64'));
+assert.equal(hex(base64ToBytes(bigB64)), hex(big));
+ok('handles a payload larger than its own chunk size');
+
+console.log('');
+console.log('sealing status media');
+const sealedMedia = sealBytes(phoneA.keys.msgKey, big);
+assert.notEqual(hex(sealedMedia.slice(24)), hex(big));
+assert.equal(hex(unsealBytes(phoneA.keys.msgKey, sealedMedia)), hex(big));
+ok('status media seals and opens byte-for-byte');
+
+assert.throws(() => unsealBytes(other.keys.msgKey, sealedMedia));
+ok('and cannot be opened by another vault');
+
+console.log(``);
+console.log(`${pass} checks passed`);

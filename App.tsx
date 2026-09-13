@@ -16,8 +16,12 @@ import { mkMsg, newId, type Msg, type MediaKind } from './src/store/messages';
 import { loadHistory, saveHistory, clearHistory } from './src/store/history';
 import { loadOutbox, saveOutbox, clearOutbox, type Pending } from './src/store/outbox';
 import {
-  loadStatus, saveStatus, clearStatus, isLive, type Status, type StatusImage,
+  loadStatuses, writeStatuses, clearStatuses, toSummary, isLiveItem,
+  STATUS_TTL_MS, STATUS_VIDEO_SECONDS, type StatusItem,
 } from './src/store/status';
+import {
+  writeStatusMedia, readStatusMedia, wipeStatusMedia,
+} from './src/store/statusMedia';
 import { Signaling, type Role } from './src/net/signaling';
 import { Peer, type CallKind } from './src/net/peer';
 import type { Envelope } from './src/net/transport';
@@ -66,10 +70,11 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [relayUp, setRelayUp] = useState(false);
 
-  const [myStatus, setMyStatus] = useState<Status | null>(null);
-  const myStatusRef = useRef<Status | null>(null);
-  myStatusRef.current = myStatus;
-  const [theirStatus, setTheirStatus] = useState<Status | null>(null);
+  const [myStatuses, setMyStatuses] = useState<StatusItem[]>([]);
+  const myStatusesRef = useRef<StatusItem[]>([]);
+  myStatusesRef.current = myStatuses;
+  /** Theirs, in memory only — they decide how long their own words live. */
+  const [theirStatuses, setTheirStatuses] = useState<StatusItem[]>([]);
 
   const sigRef = useRef<Signaling | null>(null);
   const peerRef = useRef<Peer | null>(null);
@@ -138,8 +143,8 @@ export default function App() {
     setSending(null);
     setShared(null);
     setSharedBusy(false);
-    setMyStatus(null);
-    setTheirStatus(null);
+    setMyStatuses([]);
+    setTheirStatuses([]);
     setStatus('Offline');
     setUnlocked(false);
     setActive(null);
@@ -195,14 +200,28 @@ export default function App() {
         markDelivered(e.id, 'delivered');
         return;
       }
-      case 'status':
-        setTheirStatus({
-          text: e.text, at: e.at, expiresAt: e.expiresAt, image: e.image, source: e.source,
+      case 'status-list':
+        // Metadata only; the bytes are fetched when a viewer opens one.
+        setTheirStatuses(e.items.filter(isLiveItem).map((s) => ({ ...s })));
+        return;
+      case 'status-want': {
+        const mine = myStatusesRef.current.find((s) => s.id === e.id);
+        if (!mine?.mediaId) return;
+        sendStatusMediaRef.current?.(mine);
+        return;
+      }
+      case 'status-clear':
+        setTheirStatuses([]);
+        return;
+      case 'delete': {
+        const gone = new Set(e.ids);
+        setMessages((m) => {
+          const next = m.filter((x) => !gone.has(x.id));
+          persistHistory(next);
+          return next;
         });
         return;
-      case 'status-clear':
-        setTheirStatus(null);
-        return;
+      }
       case 'call': {
         if (e.action === 'ring') {
           setCall({ kind: e.callKind ?? 'audio', state: 'incoming' });
@@ -274,13 +293,8 @@ export default function App() {
         if (!open) return;
         pushSystem('Connected directly.');
         flushOutbox();
-        const mine = myStatusRef.current;
-        if (isLive(mine)) {
-          peer.send({
-            k: 'status', text: mine.text, at: mine.at, expiresAt: mine.expiresAt,
-            image: mine.image, source: mine.source,
-          });
-        }
+        const mine = myStatusesRef.current.filter(isLiveItem);
+        peer.send({ k: 'status-list', items: mine.map(toSummary) });
       },
       onEnvelope: (e) => applyEnvelope(e),
       onMedia: (id, kind, uri, mime, bytes, at, duration) => {
@@ -297,6 +311,9 @@ export default function App() {
             ? m.map((x) => (x.id === id ? { ...x, progress } : x))
             : [...m, { id, kind: 'in' as const, body: '', at: Date.now(), progress }],
         );
+      },
+      onStatusMedia: (statusId, uri) => {
+        setTheirStatuses((list) => list.map((s) => (s.id === statusId ? { ...s, uri } : s)));
       },
       onLocalStream: setLocalStream,
       onRemoteStream: setRemoteStream,
@@ -325,7 +342,7 @@ export default function App() {
           peerRef.current?.start();
         } else {
           setConnected(false);
-          setTheirStatus(null);
+          setTheirStatuses([]);
           peerRef.current?.destroy();
           peerRef.current = null;
           setRemoteStream(null);
@@ -373,14 +390,14 @@ export default function App() {
     const [history, outbox, mine] = await Promise.all([
       cfg.keepHistory ? loadHistory(keys.msgKey) : Promise.resolve([] as Msg[]),
       loadOutbox(keys.msgKey),
-      loadStatus(keys.msgKey),
+      loadStatuses(keys.msgKey),
     ]);
 
     history.forEach((m) => seenRef.current.add(m.id));
     outboxRef.current = outbox;
     setMessages(history);
-    setMyStatus(mine);
-    myStatusRef.current = mine;
+    setMyStatuses(mine);
+    myStatusesRef.current = mine;
 
     setUnlocked(true);
     setScreen('chat');
@@ -504,72 +521,135 @@ export default function App() {
   }, [shipMediaBytes]);
 
   // ---- status ------------------------------------------------------------
-  const updateStatus = useCallback(async (
+  /** Push the current list (metadata only) whenever it changes. */
+  const publishStatuses = useCallback((items: StatusItem[]) => {
+    peerRef.current?.send({ k: 'status-list', items: items.filter(isLiveItem).map(toSummary) });
+  }, []);
+
+  const commitStatuses = useCallback(async (items: StatusItem[]) => {
+    const keys = keysRef.current;
+    if (!keys) return;
+    const live = await writeStatuses(keys.msgKey, items);
+    setMyStatuses(live);
+    myStatusesRef.current = live;
+    publishStatuses(live);
+  }, [publishStatuses]);
+
+  /**
+   * Add one. Media is written to its own encrypted file; only the reference
+   * goes in the list, so the key-value store never holds a video.
+   */
+  const addStatus = useCallback(async (
+    kind: StatusItem['kind'],
     text: string,
-    image?: StatusImage,
+    media?: { b64: string; mime: string; bytes: number; duration?: number },
     source?: string,
   ) => {
     const keys = keysRef.current;
     if (!keys) return;
-    const s = await saveStatus(keys.msgKey, text, image, source);
-    setMyStatus(s);
-    myStatusRef.current = s;
-    peerRef.current?.send(
-      s
-        ? {
-            k: 'status', text: s.text, at: s.at, expiresAt: s.expiresAt,
-            image: s.image, source: s.source,
-          }
-        : { k: 'status-clear' },
+
+    const at = Date.now();
+    const item: StatusItem = {
+      id: newId(),
+      kind,
+      text: text.trim(),
+      at,
+      expiresAt: at + STATUS_TTL_MS,
+      source,
+    };
+
+    if (media) {
+      item.mediaId = await writeStatusMedia(keys.msgKey, media.b64);
+      item.mime = media.mime;
+      item.bytes = media.bytes;
+      item.duration = media.duration;
+      item.uri = `data:${media.mime};base64,${media.b64}`;
+    }
+
+    await commitStatuses([item, ...myStatusesRef.current]);
+  }, [commitStatuses]);
+
+  const removeStatus = useCallback(async (id: string) => {
+    await commitStatuses(myStatusesRef.current.filter((s) => s.id !== id));
+  }, [commitStatuses]);
+
+  /** Read one of ours back off disk, for viewing it again later. */
+  const loadMyStatusMedia = useCallback(async (id: string) => {
+    const keys = keysRef.current;
+    const item = myStatusesRef.current.find((s) => s.id === id);
+    if (!keys || !item?.mediaId || item.uri) return;
+    const b64 = await readStatusMedia(keys.msgKey, item.mediaId);
+    if (!b64) return;
+    const uri = `data:${item.mime ?? 'image/jpeg'};base64,${b64}`;
+    setMyStatuses((list) => list.map((s) => (s.id === id ? { ...s, uri } : s)));
+    myStatusesRef.current = myStatusesRef.current.map((s) => (s.id === id ? { ...s, uri } : s));
+  }, []);
+
+  /** Ask for theirs when a viewer actually opens it. */
+  const wantStatusMedia = useCallback((id: string) => {
+    const item = theirStatuses.find((s) => s.id === id);
+    if (!item || item.uri || item.kind === 'text') return;
+    peerRef.current?.send({ k: 'status-want', id });
+  }, [theirStatuses]);
+
+  /** Answer a request for one of ours. */
+  const sendStatusMedia = useCallback(async (item: StatusItem) => {
+    const keys = keysRef.current;
+    const peer = peerRef.current;
+    if (!keys || !peer?.isOpen || !item.mediaId) return;
+    const b64 = item.uri?.split(',')[1] ?? (await readStatusMedia(keys.msgKey, item.mediaId));
+    if (!b64) return;
+    await peer.sendMedia(
+      newId(),
+      item.kind === 'video' ? 'video' : 'photo',
+      b64,
+      item.mime ?? 'image/jpeg',
+      item.bytes ?? 0,
+      item.duration,
+      () => {},
+      item.id,
     );
   }, []);
 
-  // ---- shared from another app -------------------------------------------
-  /**
-   * Whatever Instagram, Facebook, the gallery or a browser just handed us.
-   *
-   * The bytes are read immediately rather than on the user's next tap: the
-   * content:// URI in a share is borrowed, and the permission behind it is
-   * routinely gone by the time someone has unlocked and made up their mind.
-   */
-  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent({
-    resetOnBackground: false,
-  });
+  // Held in a ref so applyEnvelope can reach it without a circular dependency.
+  const sendStatusMediaRef = useRef<((item: StatusItem) => void) | null>(null);
+  sendStatusMediaRef.current = sendStatusMedia;
 
-  useEffect(() => {
-    if (!hasShareIntent || !shareIntent) return;
+  const pickStatusMedia = useCallback(async (kind: 'photo' | 'video') => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return;
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: kind === 'video' ? ['videos'] : ['images'],
+        quality: kind === 'video' ? 0.5 : 1,
+        // A status is not a film, and every second is a second of encrypted
+        // video sitting on the phone.
+        videoMaxDuration: STATUS_VIDEO_SECONDS,
+        exif: false, // no location, no camera serial
+      });
+      if (res.canceled || !res.assets?.length) return;
+      const asset = res.assets[0];
 
-    const take = async () => {
-      const file = shareIntent.files?.[0];
-      const caption = shareIntent.text ?? shareIntent.webUrl ?? undefined;
-
-      if (!file) {
-        if (!caption) return resetShareIntent();
-        setShared({ kind: 'text', text: caption });
-      } else {
-        const mime = file.mimeType || 'image/jpeg';
-        setShared({
-          kind: kindForMime(mime),
-          text: caption,
-          uri: file.path,
-          mime,
-          bytes: file.size ?? undefined,
-          duration: file.duration ?? undefined,
+      if (kind === 'photo') {
+        const image = await toStatusImage(asset.uri);
+        await addStatus('photo', '', {
+          b64: image.uri.split(',')[1],
+          mime: image.mime,
+          bytes: image.bytes,
         });
+        return;
       }
-      resetShareIntent();
-      // Locked? Leave them at the notes list; the sheet is shown once they are
-      // in. Nothing about the share is visible until then.
-      setScreen((s) => (keysRef.current ? 'shared' : s));
-    };
 
-    take();
-  }, [hasShareIntent, shareIntent, resetShareIntent]);
-
-  // A share that arrived while locked surfaces the moment the vault opens.
-  useEffect(() => {
-    if (unlocked && shared && screen === 'chat') setScreen('shared');
-  }, [unlocked, shared, screen]);
+      const mime = asset.mimeType ?? 'video/mp4';
+      const { b64, bytes } = await readSharedFile(asset.uri, mime);
+      await addStatus('video', '', {
+        b64, mime, bytes,
+        duration: asset.duration ? asset.duration / 1000 : undefined,
+      });
+    } catch {
+      Alert.alert('Could not use that', 'Something went wrong reading the file.');
+    }
+  }, [addStatus]);
 
   const sendShared = useCallback(async () => {
     const item = shared;
@@ -586,7 +666,10 @@ export default function App() {
         if (item.text) sendText(item.text);
       }
     } catch {
-      Alert.alert('Could not send that', 'The file may be too large, or the app that shared it has already taken it back.');
+      Alert.alert(
+        'Could not send that',
+        'The file may be too large, or the app that shared it has already taken it back.',
+      );
     }
     setSharedBusy(false);
     setShared(null);
@@ -598,33 +681,53 @@ export default function App() {
     if (!item) return;
     setSharedBusy(true);
     try {
-      // Video makes a poor status and a worse thing to store; keep the words.
-      const image = item.kind === 'photo' && item.uri ? await toStatusImage(item.uri) : undefined;
-      await updateStatus(item.text ?? '', image, item.kind === 'text' ? undefined : 'shared');
+      if (item.kind === 'photo' && item.uri) {
+        const image = await toStatusImage(item.uri);
+        await addStatus('photo', item.text ?? '', {
+          b64: image.uri.split(',')[1], mime: image.mime, bytes: image.bytes,
+        }, 'shared');
+      } else if (item.kind === 'video' && item.uri && item.mime) {
+        const { b64, bytes } = await readSharedFile(item.uri, item.mime);
+        await addStatus('video', item.text ?? '', {
+          b64, mime: item.mime, bytes, duration: item.duration,
+        }, 'shared');
+      } else {
+        await addStatus('text', item.text ?? '');
+      }
     } catch {
       Alert.alert('Could not use that', 'The app that shared it may have already taken it back.');
     }
     setSharedBusy(false);
     setShared(null);
     setScreen('chat');
-  }, [shared, updateStatus]);
+  }, [shared, addStatus]);
 
-  const pickStatusPhoto = useCallback(async () => {
-    try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) return;
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        quality: 1,
-        exif: false, // no location, no camera serial
-      });
-      if (res.canceled || !res.assets?.length) return;
-      const image = await toStatusImage(res.assets[0].uri);
-      await updateStatus(myStatusRef.current?.text ?? '', image);
-    } catch {
-      Alert.alert('Could not use that', 'Something went wrong reading the picture.');
-    }
-  }, [updateStatus]);
+  // ---- deleting ----------------------------------------------------------
+  /**
+   * Remove messages from this phone, and optionally from theirs.
+   *
+   * "For both" is a request, not a guarantee, and the UI says so: it only lands
+   * if their app is running to receive it. Nothing here can reach a phone that
+   * is switched off, and pretending otherwise would be the kind of promise this
+   * app should not make.
+   */
+  const deleteMessages = useCallback((ids: string[], forBoth: boolean) => {
+    const gone = new Set(ids);
+    setMessages((m) => {
+      const next = m.filter((x) => !gone.has(x.id));
+      persistHistory(next);
+      return next;
+    });
+    // Stop re-sending anything that is being taken back.
+    outboxRef.current = outboxRef.current.filter((p) => !gone.has(p.id));
+    persistOutbox();
+    if (forBoth) peerRef.current?.send({ k: 'delete', ids });
+  }, [persistHistory, persistOutbox]);
+
+  const clearChat = useCallback((forBoth: boolean) => {
+    const ids = messagesRef.current.filter((m) => m.kind !== 'system').map((m) => m.id);
+    deleteMessages(ids, forBoth);
+  }, [deleteMessages]);
 
   // ---- calls -------------------------------------------------------------
   const startCall = (kind: CallKind) => {
@@ -730,7 +833,8 @@ export default function App() {
             await destroyVault();
             await clearHistory();
             await clearOutbox();
-            await clearStatus();
+            await clearStatuses();
+            await wipeStatusMedia();
             setHasVault(false);
             lock();
           }}
@@ -760,12 +864,17 @@ export default function App() {
           connected={connected}
           relayUp={relayUp}
           keepHistory={settings.keepHistory}
-          myStatus={myStatus}
-          theirStatus={theirStatus}
+          myStatuses={myStatuses}
+          theirStatuses={theirStatuses}
           sending={sending}
           onSend={sendText}
-          onSetStatus={updateStatus}
-          onPickStatusPhoto={pickStatusPhoto}
+          onAddTextStatus={(text) => addStatus('text', text)}
+          onAddStatusMedia={pickStatusMedia}
+          onRemoveStatus={removeStatus}
+          onWantStatusMedia={wantStatusMedia}
+          onLoadMyStatusMedia={loadMyStatusMedia}
+          onDeleteMessages={deleteMessages}
+          onClearChat={clearChat}
           onPickPhoto={(camera) => shipMedia('photo', () => pickPhoto(camera))}
           onPickVideo={(camera) => shipMedia('video', () => pickVideo(camera))}
           onSendRecording={(uri, seconds) => shipMedia('audio', () => readRecording(uri, seconds))}

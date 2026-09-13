@@ -12,6 +12,7 @@
  * worth caring about, and let progress be shown while a photo arrives.
  */
 import type { MediaKind } from '../store/messages';
+import type { StatusSummary } from '../store/status';
 
 /** Comfortably under the smallest data-channel message limit in the wild. */
 export const CHUNK_BYTES = 16 * 1024;
@@ -31,16 +32,18 @@ export type Envelope =
   | { k: 'msg'; id: string; body: string; at: number }
   | { k: 'ack'; id: string }
   | { k: 'call'; action: 'ring' | 'accept' | 'decline' | 'hangup'; callKind?: 'audio' | 'video' }
-  | {
-      k: 'status';
-      text: string;
-      at: number;
-      expiresAt: number;
-      /** Already downscaled by the sender; a status picture is small. */
-      image?: { uri: string; mime: string; bytes: number };
-      source?: string;
-    }
+  /**
+   * The list of statuses, without any of the bytes.
+   *
+   * Media is fetched on demand rather than pushed: several clips would be a
+   * long, silent transfer on connect, most of which the viewer never opens.
+   */
+  | { k: 'status-list'; items: StatusSummary[] }
+  /** "Send me the media for this one" — sent when a viewer actually opens it. */
+  | { k: 'status-want'; id: string }
   | { k: 'status-clear' }
+  /** Take these back off the other phone as well as this one. */
+  | { k: 'delete'; ids: string[] }
   | {
       k: 'media-start';
       id: string;
@@ -50,6 +53,9 @@ export type Envelope =
       chunks: number;
       duration?: number;
       at: number;
+      /** Present when this transfer is a status being fetched, not a message.
+       *  Without it the picture would land in the conversation. */
+      statusId?: string;
     }
   | { k: 'media-chunk'; id: string; seq: number; b64: string }
   | { k: 'media-end'; id: string }

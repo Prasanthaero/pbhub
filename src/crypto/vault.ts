@@ -147,6 +147,27 @@ export function seal(key: Uint8Array, plaintext: string): string {
   return toHex(joined);
 }
 
+/**
+ * Seal raw bytes — for status media, which is far too big to go through the
+ * key-value store as a hex string.
+ *
+ * Returns nonce||ciphertext as bytes, so the caller can base64 it into a file
+ * without ever holding a doubled-up hex copy of a video in memory.
+ */
+export function sealBytes(key: Uint8Array, plain: Uint8Array): Uint8Array {
+  const nonce = randomBytes(24);
+  const ct = xchacha20poly1305(key, nonce).encrypt(plain);
+  const out = new Uint8Array(nonce.length + ct.length);
+  out.set(nonce);
+  out.set(ct, nonce.length);
+  return out;
+}
+
+/** Open bytes sealed by sealBytes. Throws if they were tampered with. */
+export function unsealBytes(key: Uint8Array, packed: Uint8Array): Uint8Array {
+  return xchacha20poly1305(key, packed.slice(0, 24)).decrypt(packed.slice(24));
+}
+
 /** Open a payload from the wire. Throws if it was tampered with. */
 export function unseal(key: Uint8Array, packed: string): string {
   const raw = fromHex(packed);

@@ -1,15 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Image,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Image, ScrollView,
   KeyboardAvoidingView, Platform, StatusBar, ActivityIndicator, Modal, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAudioRecorder, useAudioPlayer, RecordingPresets, setAudioModeAsync, requestRecordingPermissionsAsync } from 'expo-audio';
+import {
+  useAudioRecorder, useAudioPlayer, RecordingPresets,
+  setAudioModeAsync, requestRecordingPermissionsAsync,
+} from 'expo-audio';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { T } from '../theme';
 import type { Msg } from '../store/messages';
 import {
-  STATUS_MAX_CHARS, timeLeft, isLive, type Status, type StatusImage,
+  STATUS_MAX_CHARS, STATUS_VIDEO_SECONDS, timeLeft, isLiveItem, type StatusItem,
 } from '../store/status';
 
 type Props = {
@@ -18,13 +21,19 @@ type Props = {
   connected: boolean;
   relayUp: boolean;
   keepHistory: boolean;
-  myStatus: Status | null;
-  theirStatus: Status | null;
+  myStatuses: StatusItem[];
+  theirStatuses: StatusItem[];
   sending: { id: string; progress: number } | null;
   onSend: (text: string) => void;
-  onSetStatus: (text: string, image?: StatusImage, source?: string) => void;
-  /** Pick a photo for the status, downscaled by the caller. */
-  onPickStatusPhoto: () => void;
+  onAddTextStatus: (text: string) => void;
+  onAddStatusMedia: (kind: 'photo' | 'video') => void;
+  onRemoveStatus: (id: string) => void;
+  /** Ask the partner for the bytes of one of theirs, when it is opened. */
+  onWantStatusMedia: (id: string) => void;
+  /** Read one of ours back off disk, for looking at it again. */
+  onLoadMyStatusMedia: (id: string) => void;
+  onDeleteMessages: (ids: string[], forBoth: boolean) => void;
+  onClearChat: (forBoth: boolean) => void;
   onPickPhoto: (fromCamera: boolean) => void;
   onPickVideo: (fromCamera: boolean) => void;
   onSendRecording: (uri: string, seconds: number) => void;
@@ -36,7 +45,7 @@ type Props = {
 const clock = (ts: number) =>
   new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
-const mb = (bytes: number) =>
+const size = (bytes: number) =>
   bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
 
 /** One glyph for where an outgoing message got to. */
@@ -49,9 +58,9 @@ const tick = (d: Msg['delivery']) => {
   }
 };
 
-function VideoBubble({ uri }: { uri: string }) {
+function VideoBubble({ uri, style }: { uri: string; style?: any }) {
   const player = useVideoPlayer(uri, (p) => { p.loop = false; });
-  return <VideoView style={s.media} player={player} nativeControls contentFit="cover" />;
+  return <VideoView style={style ?? s.media} player={player} nativeControls contentFit="contain" />;
 }
 
 function AudioBubble({ uri, duration, mine }: { uri: string; duration?: number; mine: boolean }) {
@@ -87,23 +96,54 @@ function AudioBubble({ uri, duration, mine }: { uri: string; duration?: number; 
   );
 }
 
+/** A single circle in the status row. */
+function StatusBubble({
+  item, label, onPress,
+}: { item?: StatusItem; label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={s.ringWrap} onPress={onPress} activeOpacity={0.8}>
+      <View style={[s.ring, item ? s.ringLive : s.ringEmpty]}>
+        {item?.uri && item.kind === 'photo' ? (
+          <Image source={{ uri: item.uri }} style={s.ringImage} />
+        ) : (
+          <Text style={s.ringGlyph}>
+            {!item ? '+' : item.kind === 'video' ? '▶' : item.kind === 'photo' ? '◈' : 'Aa'}
+          </Text>
+        )}
+      </View>
+      <Text style={s.ringLabel} numberOfLines={1}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function Chat({
-  messages, status, connected, relayUp, keepHistory, myStatus, theirStatus, sending,
-  onSend, onSetStatus, onPickStatusPhoto, onPickPhoto, onPickVideo, onSendRecording,
-  onCall, onLock, onSettings,
+  messages, status, connected, relayUp, keepHistory, myStatuses, theirStatuses, sending,
+  onSend, onAddTextStatus, onAddStatusMedia, onRemoveStatus, onWantStatusMedia,
+  onLoadMyStatusMedia, onDeleteMessages, onClearChat,
+  onPickPhoto, onPickVideo, onSendRecording, onCall, onLock, onSettings,
 }: Props) {
   const [draft, setDraft] = useState('');
   const [attachOpen, setAttachOpen] = useState(false);
-  const [statusOpen, setStatusOpen] = useState(false);
+  const [addStatusOpen, setAddStatusOpen] = useState(false);
   const [statusDraft, setStatusDraft] = useState('');
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [viewing, setViewing] = useState<Msg | null>(null);
-  const [statusView, setStatusView] = useState<Status | null>(null);
+
+  /** Which list is open in the story viewer, and where we are in it. */
+  const [story, setStory] = useState<{ mine: boolean; index: number } | null>(null);
+
+  /** Messages picked out for deletion. Empty means normal mode. */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const listRef = useRef<FlatList<Msg>>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recStarted = useRef(0);
+
+  const mine = myStatuses.filter(isLiveItem);
+  const theirs = theirStatuses.filter(isLiveItem);
+  const storyList = story ? (story.mine ? mine : theirs) : [];
+  const storyItem = story ? storyList[story.index] : undefined;
 
   // Tick the recording timer so it is obvious something is being captured.
   useEffect(() => {
@@ -111,6 +151,14 @@ export default function Chat({
     const t = setInterval(() => setRecSeconds((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, [recording]);
+
+  // Fetch the bytes only when a status is actually opened — several clips would
+  // be a long silent transfer on connect, most of which is never looked at.
+  useEffect(() => {
+    if (!storyItem || storyItem.uri || storyItem.kind === 'text') return;
+    if (story?.mine) onLoadMyStatusMedia(storyItem.id);
+    else onWantStatusMedia(storyItem.id);
+  }, [storyItem, story?.mine, onLoadMyStatusMedia, onWantStatusMedia]);
 
   const send = () => {
     const t = draft.trim();
@@ -150,79 +198,122 @@ export default function Chat({
     }
   };
 
-  const openStatus = () => {
-    setStatusDraft(myStatus?.text ?? '');
-    setStatusOpen(true);
+  // ---- selecting and deleting ---------------------------------------------
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
-  const saveStatus = () => {
-    // Editing the words must not silently drop the picture.
-    onSetStatus(statusDraft, myStatus?.image, myStatus?.source);
-    setStatusOpen(false);
+  /**
+   * Deleting on both phones is a request, not a guarantee, and the wording says
+   * so. It only lands if their app is open to receive it — nothing here can
+   * reach a phone that is switched off, and implying otherwise would be the
+   * kind of promise this app should not make.
+   */
+  const deletePrompt = (title: string, run: (forBoth: boolean) => void) => {
+    Alert.alert(
+      title,
+      connected
+        ? 'Deleting on both phones only works while their app is open.'
+        : 'They are not in the app, so this can only delete it here.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Just here', onPress: () => run(false) },
+        ...(connected
+          ? [{ text: 'Both phones', style: 'destructive' as const, onPress: () => run(true) }]
+          : []),
+      ],
+    );
   };
 
+  const confirmDelete = () => {
+    const ids = [...selected];
+    deletePrompt(`Delete ${ids.length} message${ids.length === 1 ? '' : 's'}?`, (forBoth) => {
+      onDeleteMessages(ids, forBoth);
+      setSelected(new Set());
+    });
+  };
+
+  const confirmClear = () =>
+    deletePrompt('Clear the whole conversation?', (forBoth) => onClearChat(forBoth));
+
+  const selecting = selected.size > 0;
   const dot = connected ? T.ok : relayUp ? T.accent : T.vaultInkSoft;
 
   return (
     <SafeAreaView style={s.wrap} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor={T.vaultBg} />
 
-      <View style={s.bar}>
-        <TouchableOpacity onPress={onLock} hitSlop={12}>
-          <Text style={s.lock}>Close</Text>
-        </TouchableOpacity>
-
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'center' }}>
-          <View style={[s.dot, { backgroundColor: dot }]} />
-          <Text style={s.status} numberOfLines={1}>{status}</Text>
-        </View>
-
-        <View style={{ flexDirection: 'row', gap: 14 }}>
-          <TouchableOpacity onPress={() => onCall('audio')} disabled={!connected} hitSlop={8}>
-            <Text style={[s.icon, !connected && s.iconOff]}>Call</Text>
+      {selecting ? (
+        <View style={s.bar}>
+          <TouchableOpacity onPress={() => setSelected(new Set())} hitSlop={12}>
+            <Text style={s.lock}>Cancel</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => onCall('video')} disabled={!connected} hitSlop={8}>
-            <Text style={[s.icon, !connected && s.iconOff]}>Video</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={onSettings} hitSlop={8}>
-            <Text style={s.icon}>•••</Text>
+          <Text style={s.selCount}>{selected.size} selected</Text>
+          <TouchableOpacity onPress={confirmDelete} hitSlop={12}>
+            <Text style={[s.icon, { color: T.danger }]}>Delete</Text>
           </TouchableOpacity>
         </View>
-      </View>
-
-      {/* Status strip: theirs on the left, yours tappable on the right. */}
-      <View style={s.statusBar}>
-        {isLive(theirStatus) ? (
-          <TouchableOpacity
-            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}
-            activeOpacity={0.8}
-            onPress={() => setStatusView(theirStatus)}
-          >
-            {!!theirStatus.image && (
-              <Image source={{ uri: theirStatus.image.uri }} style={s.statusThumb} />
-            )}
-            <View style={{ flex: 1 }}>
-              <Text style={s.theirStatus} numberOfLines={2}>
-                {theirStatus.text || 'Shared a picture'}
-              </Text>
-              <Text style={s.statusMeta}>{timeLeft(theirStatus)} · tap to open</Text>
-            </View>
+      ) : (
+        <View style={s.bar}>
+          <TouchableOpacity onPress={onLock} hitSlop={12}>
+            <Text style={s.lock}>Close</Text>
           </TouchableOpacity>
-        ) : (
-          <View style={{ flex: 1 }}>
-            <Text style={s.noStatus}>No status from them</Text>
+
+          <View style={s.statusCenter}>
+            <View style={[s.dot, { backgroundColor: dot }]} />
+            <Text style={s.status} numberOfLines={1}>{status}</Text>
           </View>
+
+          <View style={{ flexDirection: 'row', gap: 14 }}>
+            <TouchableOpacity onPress={() => onCall('audio')} disabled={!connected} hitSlop={8}>
+              <Text style={[s.icon, !connected && s.iconOff]}>Call</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => onCall('video')} disabled={!connected} hitSlop={8}>
+              <Text style={[s.icon, !connected && s.iconOff]}>Video</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onSettings} onLongPress={confirmClear} hitSlop={8}>
+              <Text style={s.icon}>•••</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Status row: yours first, then theirs, newest to oldest. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={s.statusRow}
+        contentContainerStyle={{ paddingHorizontal: 12, alignItems: 'center' }}
+      >
+        <StatusBubble
+          item={mine[0]}
+          label={mine.length ? `You · ${mine.length}` : 'Add'}
+          onPress={() => (mine.length ? setStory({ mine: true, index: 0 }) : setAddStatusOpen(true))}
+        />
+        {mine.length > 0 && (
+          <TouchableOpacity style={s.addSmall} onPress={() => setAddStatusOpen(true)}>
+            <Text style={s.addSmallText}>+</Text>
+          </TouchableOpacity>
         )}
-        <TouchableOpacity
-          style={s.statusBtn}
-          onPress={openStatus}
-          onLongPress={() => isLive(myStatus) && setStatusView(myStatus)}
-        >
-          <Text style={s.statusBtnText}>
-            {isLive(myStatus) ? 'Your status' : 'Set status'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+        <View style={s.rowDivider} />
+        {theirs.length ? (
+          theirs.map((item, i) => (
+            <StatusBubble
+              key={item.id}
+              item={item}
+              label={timeLeft(item)}
+              onPress={() => setStory({ mine: false, index: i })}
+            />
+          ))
+        ) : (
+          <Text style={s.noStatus}>No status from them</Text>
+        )}
+      </ScrollView>
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -245,46 +336,55 @@ export default function Chat({
           renderItem={({ item }) => {
             if (item.kind === 'system') return <Text style={s.system}>{item.body}</Text>;
 
-            const mine = item.kind === 'out';
+            const isMine = item.kind === 'out';
             const m = item.media;
+            const picked = selected.has(item.id);
 
             return (
-              <View style={[s.row, { justifyContent: mine ? 'flex-end' : 'flex-start' }]}>
-                <View style={[s.bubble, mine ? s.mine : s.theirs, m ? s.bubbleMedia : null]}>
+              <TouchableOpacity
+                activeOpacity={selecting ? 0.7 : 1}
+                onLongPress={() => toggleSelect(item.id)}
+                onPress={() => {
+                  if (selecting) return toggleSelect(item.id);
+                  if (m?.kind === 'photo') setViewing(item);
+                }}
+                style={[
+                  s.row,
+                  { justifyContent: isMine ? 'flex-end' : 'flex-start' },
+                  picked && s.rowPicked,
+                ]}
+              >
+                <View style={[s.bubble, isMine ? s.mine : s.theirs, m ? s.bubbleMedia : null]}>
                   {m?.kind === 'photo' && (
-                    <TouchableOpacity onPress={() => setViewing(item)} activeOpacity={0.9}>
-                      <Image source={{ uri: m.uri }} style={s.media} resizeMode="cover" />
-                    </TouchableOpacity>
+                    <Image source={{ uri: m.uri }} style={s.media} resizeMode="cover" />
                   )}
                   {m?.kind === 'video' && <VideoBubble uri={m.uri} />}
                   {m?.kind === 'audio' && (
-                    <AudioBubble uri={m.uri} duration={m.duration} mine={mine} />
+                    <AudioBubble uri={m.uri} duration={m.duration} mine={isMine} />
                   )}
 
                   {!m && item.progress !== undefined && (
                     <View style={s.incomingMedia}>
                       <ActivityIndicator color="#fff" />
-                      <Text style={s.progressText}>
-                        {Math.round(item.progress * 100)}%
-                      </Text>
+                      <Text style={s.progressText}>{Math.round(item.progress * 100)}%</Text>
                     </View>
                   )}
 
                   {!!item.body && <Text style={s.msg}>{item.body}</Text>}
 
                   <View style={s.meta}>
-                    {!!m && <Text style={s.metaSize}>{mb(m.bytes)}</Text>}
+                    {!!m && <Text style={s.metaSize}>{size(m.bytes)}</Text>}
                     <Text style={s.time}>{clock(item.at)}</Text>
-                    {mine && <Text style={s.tick}>{tick(item.delivery)}</Text>}
+                    {isMine && <Text style={s.tick}>{tick(item.delivery)}</Text>}
                   </View>
 
-                  {mine && item.progress !== undefined && (
+                  {isMine && item.progress !== undefined && (
                     <View style={s.progressTrack}>
                       <View style={[s.progressFill, { width: `${item.progress * 100}%` }]} />
                     </View>
                   )}
                 </View>
-              </View>
+              </TouchableOpacity>
             );
           }}
         />
@@ -310,33 +410,159 @@ export default function Chat({
               style={s.input}
               value={draft}
               onChangeText={setDraft}
-              placeholder={connected ? 'Message' : relayUp ? 'They will get it when they open the app' : 'Offline'}
+              placeholder={
+                connected ? 'Message'
+                  : relayUp ? 'They will get it when they open the app'
+                  : 'Offline'
+              }
               placeholderTextColor={T.vaultInkSoft}
               multiline
               autoCorrect={false}
             />
 
-            {draft.trim() ? (
-              <TouchableOpacity style={s.send} onPress={send}>
-                <Text style={s.sendText}>Send</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity style={s.send} onPress={startRecording}>
-                <Text style={s.sendText}>Hold</Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity style={s.send} onPress={draft.trim() ? send : startRecording}>
+              <Text style={s.sendText}>{draft.trim() ? 'Send' : 'Hold'}</Text>
+            </TouchableOpacity>
           </View>
         )}
       </KeyboardAvoidingView>
 
-      {/* Attachment sheet */}
-      <Modal visible={attachOpen} transparent animationType="slide" onRequestClose={() => setAttachOpen(false)}>
+      {/* ---- story viewer ---- */}
+      <Modal
+        visible={!!storyItem}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setStory(null)}
+      >
+        <View style={s.viewer}>
+          {/* One segment per status, so the position in the list is obvious. */}
+          <View style={s.segments}>
+            {storyList.map((it, i) => (
+              <View key={it.id} style={[s.segment, i === story?.index ? s.segmentOn : null]} />
+            ))}
+          </View>
+
+          <TouchableOpacity
+            style={s.viewerBody}
+            activeOpacity={1}
+            onPress={() => {
+              if (!story) return;
+              const next = story.index + 1;
+              if (next < storyList.length) setStory({ ...story, index: next });
+              else setStory(null);
+            }}
+          >
+            {storyItem?.kind === 'video' && storyItem.uri && (
+              <VideoBubble uri={storyItem.uri} style={s.viewerMedia} />
+            )}
+            {storyItem?.kind === 'photo' && storyItem.uri && (
+              <Image source={{ uri: storyItem.uri }} style={s.viewerMedia} resizeMode="contain" />
+            )}
+            {storyItem && storyItem.kind !== 'text' && !storyItem.uri && (
+              <View style={s.viewerLoading}>
+                <ActivityIndicator color="#fff" />
+                <Text style={s.viewerHint}>Fetching…</Text>
+              </View>
+            )}
+            {!!storyItem?.text && (
+              <Text style={storyItem.kind === 'text' ? s.statusOnly : s.statusCaption} selectable>
+                {storyItem.text}
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          <View style={s.viewerBar}>
+            <Text style={s.viewerHint}>
+              {storyItem ? timeLeft(storyItem) : ''} · tap for next
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 18 }}>
+              {story?.mine && storyItem && (
+                <TouchableOpacity
+                  onPress={() => {
+                    onRemoveStatus(storyItem.id);
+                    setStory(null);
+                  }}
+                >
+                  <Text style={{ color: T.danger, fontWeight: '600' }}>Delete</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={() => setStory(null)}>
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ---- add a status ---- */}
+      <Modal
+        visible={addStatusOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setAddStatusOpen(false)}
+      >
+        <View style={s.sheetBg}>
+          <View style={s.sheet}>
+            <Text style={s.sheetTitle}>New status</Text>
+            <Text style={s.sheetNote}>
+              Kept on this phone, encrypted, and shown to your partner for a day before it deletes
+              itself. A status picture or clip is stored, unlike anything else here.
+            </Text>
+
+            <TextInput
+              style={s.statusInput}
+              value={statusDraft}
+              onChangeText={(t) => setStatusDraft(t.slice(0, STATUS_MAX_CHARS))}
+              placeholder="say something"
+              placeholderTextColor={T.vaultInkSoft}
+              multiline
+            />
+            <Text style={s.counter}>{statusDraft.length}/{STATUS_MAX_CHARS}</Text>
+
+            <TouchableOpacity
+              style={[s.statusAction, { backgroundColor: T.mine, borderColor: T.mine }]}
+              onPress={() => {
+                if (statusDraft.trim()) onAddTextStatus(statusDraft);
+                setStatusDraft('');
+                setAddStatusOpen(false);
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '600' }}>Post these words</Text>
+            </TouchableOpacity>
+
+            {([
+              ['Post a picture', 'photo'],
+              [`Post a clip (up to ${STATUS_VIDEO_SECONDS}s)`, 'video'],
+            ] as const).map(([label, kind]) => (
+              <TouchableOpacity
+                key={kind}
+                style={s.sheetItem}
+                onPress={() => { setAddStatusOpen(false); onAddStatusMedia(kind); }}
+              >
+                <Text style={s.sheetItemText}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity onPress={() => setAddStatusOpen(false)} style={{ marginTop: 12 }}>
+              <Text style={{ color: T.vaultInkSoft, textAlign: 'center' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ---- attachment sheet ---- */}
+      <Modal
+        visible={attachOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setAttachOpen(false)}
+      >
         <TouchableOpacity style={s.sheetBg} activeOpacity={1} onPress={() => setAttachOpen(false)}>
           <View style={s.sheet}>
             <Text style={s.sheetTitle}>Send</Text>
             <Text style={s.sheetNote}>
-              These go straight between the phones — you both need to be in the app. They are
-              never saved, on either side.
+              These go straight between the phones — you both need to be in the app. They are never
+              saved, on either side.
             </Text>
             {([
               ['Photo from gallery', () => onPickPhoto(false)],
@@ -356,81 +582,24 @@ export default function Chat({
         </TouchableOpacity>
       </Modal>
 
-      {/* Status composer */}
-      <Modal visible={statusOpen} transparent animationType="fade" onRequestClose={() => setStatusOpen(false)}>
-        <View style={s.sheetBg}>
-          <View style={s.statusCard}>
-            <Text style={s.sheetTitle}>Your status</Text>
-            <Text style={s.sheetNote}>
-              Saved on this phone only, encrypted, and sent to your partner when you are both
-              here. It disappears by itself after a day.
-            </Text>
-            {!!myStatus?.image && (
-              <Image source={{ uri: myStatus.image.uri }} style={s.statusPreview} />
-            )}
-            <TouchableOpacity
-              style={s.statusPhotoBtn}
-              onPress={() => { setStatusOpen(false); onPickStatusPhoto(); }}
-            >
-              <Text style={s.statusPhotoText}>
-                {myStatus?.image ? 'Change the picture' : 'Add a picture'}
-              </Text>
-            </TouchableOpacity>
-            <TextInput
-              style={s.statusInput}
-              value={statusDraft}
-              onChangeText={(t) => setStatusDraft(t.slice(0, STATUS_MAX_CHARS))}
-              placeholder="thinking of you"
-              placeholderTextColor={T.vaultInkSoft}
-              multiline
-              autoFocus
-            />
-            <Text style={s.counter}>{statusDraft.length}/{STATUS_MAX_CHARS}</Text>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <TouchableOpacity
-                style={[s.statusAction, { borderColor: T.vaultLine }]}
-                onPress={() => { setStatusDraft(''); onSetStatus('', undefined); setStatusOpen(false); }}
-              >
-                <Text style={{ color: T.vaultInkSoft, fontWeight: '600' }}>Clear</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.statusAction, { backgroundColor: T.mine, borderColor: T.mine }]}
-                onPress={saveStatus}
-              >
-                <Text style={{ color: '#fff', fontWeight: '600' }}>Save</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity onPress={() => setStatusOpen(false)} style={{ marginTop: 14 }}>
-              <Text style={{ color: T.vaultInkSoft, textAlign: 'center' }}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Full-screen status */}
-      <Modal visible={!!statusView} transparent animationType="fade" onRequestClose={() => setStatusView(null)}>
-        <TouchableOpacity style={s.viewer} activeOpacity={1} onPress={() => setStatusView(null)}>
-          {statusView?.image && (
-            <Image source={{ uri: statusView.image.uri }} style={s.viewerImage} resizeMode="contain" />
-          )}
-          {!!statusView?.text && (
-            <Text style={statusView.image ? s.statusCaption : s.statusOnly} selectable>
-              {statusView.text}
-            </Text>
-          )}
-          <Text style={s.viewerHint}>
-            {statusView ? timeLeft(statusView) : ''} · tap to close
-          </Text>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Full-screen photo */}
-      <Modal visible={!!viewing} transparent animationType="fade" onRequestClose={() => setViewing(null)}>
+      {/* ---- full-screen photo from the chat ---- */}
+      <Modal
+        visible={!!viewing}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewing(null)}
+      >
         <TouchableOpacity style={s.viewer} activeOpacity={1} onPress={() => setViewing(null)}>
-          {viewing?.media && (
-            <Image source={{ uri: viewing.media.uri }} style={s.viewerImage} resizeMode="contain" />
-          )}
-          <Text style={s.viewerHint}>Tap to close</Text>
+          <View style={s.viewerBody}>
+            {viewing?.media && (
+              <Image
+                source={{ uri: viewing.media.uri }}
+                style={s.viewerMedia}
+                resizeMode="contain"
+              />
+            )}
+            <Text style={s.viewerHint}>Tap to close</Text>
+          </View>
         </TouchableOpacity>
       </Modal>
     </SafeAreaView>
@@ -445,32 +614,44 @@ const s = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: T.vaultLine,
   },
   lock: { color: T.vaultInkSoft, fontSize: 15 },
+  selCount: { color: T.vaultInk, fontSize: 15, fontWeight: '600' },
+  statusCenter: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'center',
+  },
   dot: { width: 7, height: 7, borderRadius: 4 },
   status: { color: T.vaultInkSoft, fontSize: 12 },
   icon: { color: T.vaultInk, fontSize: 14, fontWeight: '600' },
   iconOff: { color: T.vaultInkSoft, opacity: 0.5 },
 
-  statusBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 14, paddingVertical: 10,
+  statusRow: {
+    maxHeight: 104, backgroundColor: T.vaultCard,
     borderBottomWidth: 1, borderBottomColor: T.vaultLine,
-    backgroundColor: T.vaultCard,
   },
-  theirStatus: { color: T.vaultInk, fontSize: 14, lineHeight: 19 },
-  statusMeta: { color: T.vaultInkSoft, fontSize: 11, marginTop: 2 },
-  noStatus: { color: T.vaultInkSoft, fontSize: 13, fontStyle: 'italic' },
-  statusBtn: {
-    borderWidth: 1, borderColor: T.accent, borderRadius: 16,
-    paddingHorizontal: 12, paddingVertical: 7,
+  ringWrap: { alignItems: 'center', width: 74, paddingVertical: 12 },
+  ring: {
+    width: 54, height: 54, borderRadius: 27, borderWidth: 2,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
-  statusBtnText: { color: T.accent, fontSize: 12.5, fontWeight: '600' },
+  ringLive: { borderColor: T.accent, backgroundColor: T.vaultBg },
+  ringEmpty: { borderColor: T.vaultLine, backgroundColor: T.vaultBg, borderStyle: 'dashed' },
+  ringImage: { width: '100%', height: '100%' },
+  ringGlyph: { color: T.vaultInkSoft, fontSize: 18 },
+  ringLabel: { color: T.vaultInkSoft, fontSize: 10.5, marginTop: 6 },
+  addSmall: {
+    width: 26, height: 26, borderRadius: 13, borderWidth: 1, borderColor: T.accent,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 22,
+  },
+  addSmallText: { color: T.accent, fontSize: 15, lineHeight: 17 },
+  rowDivider: { width: 1, height: 44, backgroundColor: T.vaultLine, marginHorizontal: 10 },
+  noStatus: { color: T.vaultInkSoft, fontSize: 13, fontStyle: 'italic', paddingHorizontal: 8 },
 
   preamble: {
     color: T.vaultInkSoft, fontSize: 12, textAlign: 'center',
     marginBottom: 18, marginTop: 6, paddingHorizontal: 20, lineHeight: 18,
   },
   system: { color: T.vaultInkSoft, fontSize: 12, textAlign: 'center', marginVertical: 8 },
-  row: { flexDirection: 'row', marginBottom: 8 },
+  row: { flexDirection: 'row', marginBottom: 8, borderRadius: 12 },
+  rowPicked: { backgroundColor: 'rgba(42,91,215,0.22)' },
   bubble: { maxWidth: '78%', borderRadius: 16, paddingHorizontal: 13, paddingVertical: 9 },
   bubbleMedia: { paddingHorizontal: 5, paddingVertical: 5 },
   mine: { backgroundColor: T.mine, borderBottomRightRadius: 5 },
@@ -489,14 +670,22 @@ const s = StyleSheet.create({
   },
   progressFill: { height: 3, backgroundColor: '#fff' },
 
-  audioRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 8, paddingVertical: 6, minWidth: 200 },
-  playBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  audioRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 8, paddingVertical: 6, minWidth: 200,
+  },
+  playBtn: {
+    width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
+  },
   playIcon: { color: '#fff', fontSize: 13 },
   waveform: { flexDirection: 'row', alignItems: 'center', gap: 3, flex: 1 },
   waveBar: { width: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.85)' },
   audioTime: { color: 'rgba(255,255,255,0.75)', fontSize: 11 },
 
-  meta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginTop: 4, paddingHorizontal: 8 },
+  meta: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end',
+    gap: 6, marginTop: 4, paddingHorizontal: 8,
+  },
   metaSize: { color: 'rgba(255,255,255,0.5)', fontSize: 10 },
   time: { color: 'rgba(255,255,255,0.55)', fontSize: 10 },
   tick: { color: 'rgba(255,255,255,0.75)', fontSize: 10 },
@@ -536,41 +725,39 @@ const s = StyleSheet.create({
     padding: 22, paddingBottom: 40, borderTopWidth: 1, borderColor: T.vaultLine,
   },
   sheetTitle: { color: T.vaultInk, fontSize: 19, fontWeight: '700' },
-  sheetNote: { color: T.vaultInkSoft, fontSize: 12.5, lineHeight: 18, marginTop: 8, marginBottom: 16 },
+  sheetNote: {
+    color: T.vaultInkSoft, fontSize: 12.5, lineHeight: 18, marginTop: 8, marginBottom: 16,
+  },
   sheetItem: { paddingVertical: 15, borderTopWidth: 1, borderTopColor: T.vaultLine },
   sheetItemText: { color: T.vaultInk, fontSize: 16 },
 
-  statusCard: {
-    backgroundColor: T.vaultCard, margin: 20, borderRadius: 18, padding: 22,
-    borderWidth: 1, borderColor: T.vaultLine, marginBottom: 'auto', marginTop: 'auto',
-  },
   statusInput: {
-    backgroundColor: T.vaultBg, borderRadius: 12, padding: 14, minHeight: 90,
+    backgroundColor: T.vaultBg, borderRadius: 12, padding: 14, minHeight: 80,
     color: T.vaultInk, fontSize: 16, borderWidth: 1, borderColor: T.vaultLine,
     textAlignVertical: 'top',
   },
-  counter: { color: T.vaultInkSoft, fontSize: 11, textAlign: 'right', marginTop: 6, marginBottom: 14 },
-  statusAction: {
-    flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center',
+  counter: {
+    color: T.vaultInkSoft, fontSize: 11, textAlign: 'right', marginTop: 6, marginBottom: 12,
   },
+  statusAction: { borderWidth: 1, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
 
-  statusThumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: '#000' },
-  statusPreview: {
-    width: '100%', height: 160, borderRadius: 12, backgroundColor: '#000', marginBottom: 12,
+  viewer: { flex: 1, backgroundColor: '#000' },
+  viewerBody: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  viewerMedia: { width: '100%', height: '80%' },
+  viewerLoading: { alignItems: 'center', gap: 12 },
+  viewerBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 20,
   },
-  statusPhotoBtn: {
-    borderWidth: 1, borderColor: T.vaultLine, borderRadius: 10,
-    paddingVertical: 11, alignItems: 'center', marginBottom: 12,
-  },
-  statusPhotoText: { color: T.accent, fontSize: 14, fontWeight: '600' },
+  viewerHint: { color: 'rgba(255,255,255,0.55)', fontSize: 12 },
+  segments: { flexDirection: 'row', gap: 4, paddingHorizontal: 12, paddingTop: 14 },
+  segment: { flex: 1, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)' },
+  segmentOn: { backgroundColor: '#fff' },
   statusCaption: {
     color: '#fff', fontSize: 16, textAlign: 'center', paddingHorizontal: 28, marginTop: 16,
   },
   /** No picture: the words are the whole thing, so give them the room. */
   statusOnly: {
-    color: '#fff', fontSize: 22, lineHeight: 32, textAlign: 'center', paddingHorizontal: 32,
+    color: '#fff', fontSize: 24, lineHeight: 34, textAlign: 'center', paddingHorizontal: 32,
   },
-  viewer: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
-  viewerImage: { width: '100%', height: '85%' },
-  viewerHint: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 12 },
 });

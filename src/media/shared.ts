@@ -21,7 +21,7 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as Legacy from 'expo-file-system/legacy';
 import { MAX_MEDIA_BYTES } from '../net/transport';
 import type { MediaKind } from '../store/messages';
-import type { StatusImage } from '../store/status';
+
 
 /** Small enough to store comfortably and to send in a blink. */
 const STATUS_MAX_EDGE = 1080;
@@ -68,7 +68,9 @@ export async function readSharedFile(
  * encrypted store would groan under it, and a full-resolution copy on disk is
  * more than anyone asked for. This produces a few hundred kilobytes.
  */
-export async function toStatusImage(uri: string): Promise<StatusImage> {
+export type DownscaledImage = { uri: string; mime: string; bytes: number };
+
+export async function toStatusImage(uri: string): Promise<DownscaledImage> {
   const ctx = ImageManipulator.manipulate(uri);
   ctx.resize({ width: STATUS_MAX_EDGE });
   const image = await ctx.renderAsync();

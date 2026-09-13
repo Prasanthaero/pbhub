@@ -35,6 +35,8 @@ export type PeerEvents = {
     id: string, kind: MediaKind, uri: string, mime: string, bytes: number,
     at: number, duration?: number,
   ) => void;
+  /** Status media that was asked for, keyed by the status it belongs to. */
+  onStatusMedia: (statusId: string, uri: string, mime: string) => void;
   onMediaProgress: (id: string, progress: number) => void;
   onLocalStream: (s: MediaStream | null) => void;
   onRemoteStream: (s: MediaStream | null) => void;
@@ -50,6 +52,9 @@ export class Peer {
   private localStream: MediaStream | null = null;
   private senders: any[] = [];
   private incoming = new Map<string, MediaAssembler>();
+  /** transfer id -> the status it is fetching, for transfers that are not
+   *  destined for the conversation. */
+  private statusTransfers = new Map<string, string>();
 
   /**
    * Who offers, and who yields in a collision.
@@ -164,25 +169,39 @@ export class Peer {
           p.id,
           new MediaAssembler(p.id, p.kind, p.mime, p.bytes, p.chunks, p.at, p.duration),
         );
+        if (p.statusId) {
+          // A status being fetched. Deliberately no progress event: this is not
+          // a message, and a placeholder bubble must not appear in the chat.
+          this.statusTransfers.set(p.id, p.statusId);
+          return;
+        }
         this.ev.onMediaProgress(p.id, 0);
         return;
       }
       case 'media-chunk': {
         const a = this.incoming.get(p.id);
         if (!a) return;
-        this.ev.onMediaProgress(p.id, a.add(p.seq, p.b64));
+        const progress = a.add(p.seq, p.b64);
+        if (!this.statusTransfers.has(p.id)) this.ev.onMediaProgress(p.id, progress);
         return;
       }
       case 'media-end': {
         const a = this.incoming.get(p.id);
         if (!a) return;
         this.incoming.delete(p.id);
+        const statusId = this.statusTransfers.get(p.id);
+        this.statusTransfers.delete(p.id);
         if (!a.complete) return; // A gap means the sender will resend it.
+        if (statusId) {
+          this.ev.onStatusMedia(statusId, a.toDataUri(), a.mime);
+          return;
+        }
         this.ev.onMedia(a.id, a.kind, a.toDataUri(), a.mime, a.bytes, a.at, a.duration);
         return;
       }
       case 'media-abort': {
         this.incoming.delete(p.id);
+        this.statusTransfers.delete(p.id);
         return;
       }
       default:
@@ -250,12 +269,15 @@ export class Peer {
     bytes: number,
     duration: number | undefined,
     onProgress: (p: number) => void,
+    statusId?: string,
   ): Promise<boolean> {
     if (!this.isOpen) return false;
 
     const chunks = chunkBase64(b64);
     const at = Date.now();
-    this.send({ k: 'media-start', id, kind, mime, bytes, chunks: chunks.length, duration, at });
+    this.send({
+      k: 'media-start', id, kind, mime, bytes, chunks: chunks.length, duration, at, statusId,
+    });
 
     for (let i = 0; i < chunks.length; i++) {
       if (!this.isOpen) {
@@ -358,6 +380,7 @@ export class Peer {
   destroy() {
     this.closeMedia();
     this.incoming.clear();
+    this.statusTransfers.clear();
     try {
       this.dc?.close();
     } catch {}
