@@ -8,10 +8,14 @@
     "@noble/hashes": "^2.4.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.22",
+    "expo-audio": "~57.0.5",
     "expo-build-properties": "~57.0.17",
     "expo-crypto": "~57.0.3",
+    "expo-file-system": "~57.0.7",
+    "expo-image-picker": "~57.0.17",
     "expo-screen-capture": "~57.0.3",
     "expo-status-bar": "~57.0.1",
+    "expo-video": "~57.0.4",
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-get-random-values": "~1.11.0",
@@ -33,9 +37,10 @@
     "android:build": "expo run:android --variant release",
     "test:crypto": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-crypto.mjs",
     "test:signaling": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-signaling.mjs",
-    "test": "npm run test:crypto && npm run test:signaling",
+    "test": "npm run test:crypto && npm run test:signaling && npm run test:mailbox",
     "icons": "node scripts/make-icons.cjs",
-    "dev": "expo run:android"
+    "dev": "expo run:android",
+    "test:mailbox": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-mailbox.mjs"
   },
   "private": true
 }

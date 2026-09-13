@@ -16,6 +16,17 @@ export type SignalingEvents = {
   onSignal: (msg: any) => void;
   onStatus: (s: string) => void;
   onClosed: (reason: string) => void;
+  /** A sealed payload that waited in the relay's mailbox, or was forwarded
+   *  through it because the data channel was not up yet. */
+  onMail: (id: string, wire: string, at: number) => void;
+  /** The backlog has been handed over; anything after this is live. */
+  onMailDone: (count: number) => void;
+  /** The relay is holding this one until the partner opens the app. */
+  onMailHeld: (id: string) => void;
+  /** The mailbox is full — the partner has been away too long. */
+  onMailFull: (id: string) => void;
+  /** Their phone confirmed receipt. */
+  onAck: (id: string) => void;
 };
 
 export class Signaling {
@@ -84,6 +95,23 @@ export class Signaling {
             // Undecryptable: someone else's traffic, or tampering. Ignore it.
           }
           break;
+        case 'mail':
+          // Left sealed on purpose. Unsealing belongs with the code that knows
+          // what an envelope is, and the relay never had a chance at it.
+          this.ev.onMail(String(msg.id), String(msg.d), Number(msg.at) || Date.now());
+          break;
+        case 'mail-done':
+          this.ev.onMailDone(Number(msg.count) || 0);
+          break;
+        case 'mail-held':
+          this.ev.onMailHeld(String(msg.id));
+          break;
+        case 'mail-full':
+          this.ev.onMailFull(String(msg.id));
+          break;
+        case 'ack':
+          this.ev.onAck(String(msg.id));
+          break;
         case 'full':
           this.closedByUs = true;
           this.ev.onClosed('Someone else is already using this passphrase.');
@@ -114,6 +142,24 @@ export class Signaling {
   send(msg: any) {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify({ t: 'sig', d: seal(this.key, JSON.stringify(msg)) }));
+  }
+
+  /** Post an already-sealed payload for a partner who may not be here.
+   *  The relay forwards it if they are, and holds it if they are not. */
+  mail(id: string, wire: string): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify({ t: 'mail', id, d: wire }));
+    return true;
+  }
+
+  /** Confirm receipt, so the sender can drop it from their outbox. */
+  ack(id: string) {
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify({ t: 'ack', id }));
+  }
+
+  get isOpen(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
   }
 
   close() {

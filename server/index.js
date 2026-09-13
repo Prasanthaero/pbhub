@@ -2,26 +2,36 @@
  * pbhub relay.
  *
  * This is deliberately the least interesting program in the repository. It
- * introduces two phones to each other and then gets out of the way.
+ * introduces two phones to each other, holds mail for whichever one is away,
+ * and otherwise gets out of the way.
  *
- * What it sees:   a room id (a hash of a passphrase it does not have), and
- *                 opaque ciphertext it cannot read.
- * What it keeps:  nothing. No disk, no log of message contents, no history.
- *                 Rooms live in a Map and vanish when the second socket closes.
- * What it can do: deny service. It cannot read, replay usefully, or
- *                 impersonate — the payloads are authenticated with a key
- *                 derived from the passphrase.
+ * What it sees:   a room id (a hash it cannot reverse without the pairing
+ *                 secret, which it does not have), and ciphertext.
+ * What it keeps:  undelivered mail, in memory, until it is collected — then it
+ *                 is dropped immediately. Nothing is ever written to disk, so a
+ *                 restart loses the queue rather than leaking it. Senders keep
+ *                 their own outbox and re-send anything unacknowledged, so that
+ *                 loss costs a retry rather than a message.
+ * What it can do: deny service, and see that two devices talk and roughly how
+ *                 much. It cannot read a single byte of any of it.
  */
 const http = require('http');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 8080;
 const MAX_ROOM = 2;
-const MAX_FRAME = 256 * 1024;
+const MAX_FRAME = 512 * 1024;
 const IDLE_MS = 10 * 60 * 1000;
 
-/** roomId -> Set<ws> */
+/** Caps per mailbox, so a room cannot be used as free storage. */
+const MAX_MAIL_ITEMS = 500;
+const MAX_MAIL_BYTES = 32 * 1024 * 1024;
+const MAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** roomId -> { clients: Set<ws>, mail: { a: [], b: [] }, bytes: {a, b} } */
 const rooms = new Map();
+
+const emptyRoom = () => ({ clients: new Set(), mail: { a: [], b: [] }, bytes: { a: 0, b: 0 } });
 
 const server = http.createServer((req, res) => {
   // A single unremarkable health endpoint. Nothing else is served.
@@ -39,15 +49,35 @@ const send = (ws, obj) => {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
 };
 
+const otherRole = (role) => (role === 'a' ? 'b' : 'a');
+
 const peersOf = (ws) => {
-  const set = rooms.get(ws.roomId);
-  if (!set) return [];
-  return [...set].filter((c) => c !== ws);
+  const room = rooms.get(ws.roomId);
+  if (!room) return [];
+  return [...room.clients].filter((c) => c !== ws);
 };
+
+/** Hand over everything waiting for this peer, oldest first. */
+function deliverMail(ws) {
+  const room = rooms.get(ws.roomId);
+  if (!room) return;
+  const queue = room.mail[ws.role];
+  if (!queue.length) return;
+
+  const now = Date.now();
+  const live = queue.filter((m) => now - m.at < MAIL_TTL_MS);
+  room.mail[ws.role] = [];
+  room.bytes[ws.role] = 0;
+
+  for (const m of live) send(ws, { t: 'mail', id: m.id, d: m.d, at: m.at });
+  // Tell the peer where the backlog ends, so it can stop showing "catching up".
+  send(ws, { t: 'mail-done', count: live.length });
+}
 
 wss.on('connection', (ws) => {
   ws.isAlive = true;
   ws.roomId = null;
+  ws.role = null;
   ws.lastSeen = Date.now();
 
   ws.on('pong', () => {
@@ -70,63 +100,119 @@ wss.on('connection', (ws) => {
       // Room ids are hex hashes of a fixed width. Anything else is not ours.
       if (!/^[0-9a-f]{32}$/.test(id)) return ws.close();
 
-      const set = rooms.get(id) || new Set();
+      const room = rooms.get(id) || emptyRoom();
 
       // Drop anything in the room that has already failed a ping. Without this
       // a phone that was killed (battery, force-stop, crashed emulator) holds
       // its slot until the next sweep, and its owner cannot get back in.
-      [...set].forEach((c) => {
+      [...room.clients].forEach((c) => {
         if (c.readyState !== c.OPEN) {
-          set.delete(c);
-          try { c.terminate(); } catch {}
+          room.clients.delete(c);
+          try {
+            c.terminate();
+          } catch {}
         }
       });
 
-      if (set.size >= MAX_ROOM) {
+      if (room.clients.size >= MAX_ROOM) {
         send(ws, { t: 'full' });
         return ws.close();
       }
 
       ws.roomId = id;
-      // Take whichever slot is actually free, rather than guessing from the
-      // count. A socket that died without closing cleanly still occupies the
-      // room until the next ping sweep, and counting would then hand the same
-      // role to both peers.
-      ws.role = [...set].some((c) => c.role === 'a') ? 'b' : 'a';
-      set.add(ws);
-      rooms.set(id, set);
+      // Take whichever slot is actually free, rather than inferring it from the
+      // count, which is stale whenever a socket died without closing.
+      ws.role = [...room.clients].some((c) => c.role === 'a') ? 'b' : 'a';
+      room.clients.add(ws);
+      rooms.set(id, room);
 
-      send(ws, { t: 'joined', role: ws.role, peer: set.size === 2 });
+      send(ws, { t: 'joined', role: ws.role, peer: room.clients.size === 2 });
       peersOf(ws).forEach((p) => send(p, { t: 'peer', present: true }));
+
+      // Anything that arrived while this peer was away.
+      deliverMail(ws);
       return;
     }
 
+    if (!ws.roomId) return;
+
     if (msg.t === 'sig') {
-      if (!ws.roomId || typeof msg.d !== 'string') return;
+      if (typeof msg.d !== 'string') return;
       // Forwarded verbatim. The server has no key and no opinion.
       peersOf(ws).forEach((p) => send(p, { t: 'sig', d: msg.d }));
+      return;
+    }
+
+    if (msg.t === 'mail') {
+      if (typeof msg.d !== 'string' || typeof msg.id !== 'string') return;
+      const room = rooms.get(ws.roomId);
+      if (!room) return;
+
+      const target = otherRole(ws.role);
+      const live = [...room.clients].find((c) => c.role === target);
+
+      // Partner is here: hand it over and let them acknowledge directly.
+      if (live) {
+        send(live, { t: 'mail', id: msg.id, d: msg.d, at: Date.now() });
+        return;
+      }
+
+      // Partner is away: hold it. Caps keep a room from becoming free storage.
+      const queue = room.mail[target];
+      if (queue.length >= MAX_MAIL_ITEMS || room.bytes[target] + msg.d.length > MAX_MAIL_BYTES) {
+        send(ws, { t: 'mail-full', id: msg.id });
+        return;
+      }
+      queue.push({ id: msg.id, d: msg.d, at: Date.now() });
+      room.bytes[target] += msg.d.length;
+      send(ws, { t: 'mail-held', id: msg.id });
+      return;
+    }
+
+    if (msg.t === 'ack') {
+      // Receipts travel peer to peer; the relay only forwards them.
+      if (typeof msg.id !== 'string') return;
+      peersOf(ws).forEach((p) => send(p, { t: 'ack', id: msg.id }));
     }
   });
 
   ws.on('close', () => {
-    const set = rooms.get(ws.roomId);
-    if (!set) return;
-    set.delete(ws);
-    set.forEach((p) => send(p, { t: 'peer', present: false }));
-    if (set.size === 0) rooms.delete(ws.roomId);
+    const room = rooms.get(ws.roomId);
+    if (!room) return;
+    room.clients.delete(ws);
+    room.clients.forEach((p) => send(p, { t: 'peer', present: false }));
+    // Keep the room alive while mail is waiting; drop it when there is nothing
+    // left to hold.
+    if (room.clients.size === 0 && !room.mail.a.length && !room.mail.b.length) {
+      rooms.delete(ws.roomId);
+    }
   });
 
   ws.on('error', () => ws.terminate());
 });
 
-// Drop dead sockets and anything that has gone quiet for ten minutes, so a
-// stale room can never pin a passphrase hash in memory indefinitely.
+// Drop dead sockets, anything gone quiet for ten minutes, and mail nobody came
+// back for — so a stale room can never pin a room id in memory indefinitely.
 const sweep = setInterval(() => {
   const now = Date.now();
+
   wss.clients.forEach((ws) => {
     if (!ws.isAlive || now - ws.lastSeen > IDLE_MS) return ws.terminate();
     ws.isAlive = false;
     ws.ping();
+  });
+
+  rooms.forEach((room, id) => {
+    for (const role of ['a', 'b']) {
+      const before = room.mail[role].length;
+      room.mail[role] = room.mail[role].filter((m) => now - m.at < MAIL_TTL_MS);
+      if (room.mail[role].length !== before) {
+        room.bytes[role] = room.mail[role].reduce((n, m) => n + m.d.length, 0);
+      }
+    }
+    if (room.clients.size === 0 && !room.mail.a.length && !room.mail.b.length) {
+      rooms.delete(id);
+    }
   });
 }, 30_000);
 

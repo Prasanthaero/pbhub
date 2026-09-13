@@ -64,7 +64,9 @@
         }
       ],
       "./plugins/withReleaseSigning",
-      "./plugins/withDebugCleartext"
+      "./plugins/withDebugCleartext",
+      "expo-audio",
+      "expo-video"
     ]
   }
 }

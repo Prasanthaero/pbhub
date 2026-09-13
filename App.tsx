@@ -6,15 +6,20 @@ import type { MediaStream } from 'react-native-webrtc';
 
 import { T } from './src/theme';
 import { openVault, createVault, wipe, type VaultKeys } from './src/crypto/vault';
+import { bytesToWords } from './src/crypto/wordlist';
 import {
   readMarker, writeMarker, destroyVault, readSettings, writeSettings,
   defaultSettings, type VaultSettings,
 } from './src/store/vaultStore';
 import { loadNotes, saveNotes, newNote, type Note } from './src/store/notes';
-import { mkMsg, type Msg } from './src/store/messages';
-import { bytesToWords } from './src/crypto/wordlist';
+import { mkMsg, newId, type Msg, type MediaKind } from './src/store/messages';
+import { loadHistory, saveHistory, clearHistory } from './src/store/history';
+import { loadOutbox, saveOutbox, clearOutbox, type Pending } from './src/store/outbox';
+import { loadStatus, saveStatus, clearStatus, isLive, type Status } from './src/store/status';
 import { Signaling, type Role } from './src/net/signaling';
 import { Peer, type CallKind } from './src/net/peer';
+import type { Envelope } from './src/net/transport';
+import { pickPhoto, pickVideo, readRecording, TooLarge } from './src/media/pick';
 
 import NotesList from './src/screens/NotesList';
 import NoteEditor from './src/screens/NoteEditor';
@@ -38,31 +43,45 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('list');
   const [hasVault, setHasVault] = useState(false);
 
-  // ---- vault (all of this is RAM-only) -----------------------------------
+  // ---- vault -------------------------------------------------------------
   const keysRef = useRef<VaultKeys | null>(null);
   const [unlocked, setUnlocked] = useState(false);
   const [settings, setSettings] = useState<VaultSettings>(defaultSettings());
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
   const [messages, setMessages] = useState<Msg[]>([]);
+  const messagesRef = useRef<Msg[]>([]);
+  messagesRef.current = messages;
+
   const [status, setStatus] = useState('Offline');
   const [connected, setConnected] = useState(false);
+  const [relayUp, setRelayUp] = useState(false);
+
+  const [myStatus, setMyStatus] = useState<Status | null>(null);
+  const myStatusRef = useRef<Status | null>(null);
+  myStatusRef.current = myStatus;
+  const [theirStatus, setTheirStatus] = useState<Status | null>(null);
 
   const sigRef = useRef<Signaling | null>(null);
   const peerRef = useRef<Peer | null>(null);
   const roleRef = useRef<Role>('a');
+  const outboxRef = useRef<Pending[]>([]);
+  /** Ids already shown, so a message that arrived twice appears once. */
+  const seenRef = useRef<Set<string>>(new Set());
 
-  // Mirrored in a ref so peer callbacks can read the live call without being
-  // written as side effects inside a setState updater (which React is free to
-  // run more than once).
   const [call, setCallState] = useState<CallInfo | null>(null);
   const callRef = useRef<CallInfo | null>(null);
   const setCall = useCallback((c: CallInfo | null) => {
     callRef.current = c;
     setCallState(c);
   }, []);
+
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+  const [sending, setSending] = useState<{ id: string; progress: number } | null>(null);
 
   useEffect(() => {
     loadNotes().then(setNotes);
@@ -71,6 +90,20 @@ export default function App() {
 
   const pushSystem = useCallback((body: string) => {
     setMessages((m) => [...m, mkMsg('system', body)]);
+  }, []);
+
+  // ---- persistence -------------------------------------------------------
+  /** Write the conversation out, but only if the two of them asked for that. */
+  const persistHistory = useCallback((msgs: Msg[]) => {
+    const keys = keysRef.current;
+    if (!keys || !settingsRef.current.keepHistory) return;
+    saveHistory(keys.msgKey, msgs).catch(() => {});
+  }, []);
+
+  const persistOutbox = useCallback(() => {
+    const keys = keysRef.current;
+    if (!keys) return;
+    saveOutbox(keys.msgKey, outboxRef.current).catch(() => {});
   }, []);
 
   // ---- teardown ----------------------------------------------------------
@@ -82,24 +115,29 @@ export default function App() {
     wipe(keysRef.current?.msgKey);
     wipe(keysRef.current?.pairing);
     keysRef.current = null;
+    outboxRef.current = [];
+    seenRef.current = new Set();
     setMessages([]);
     setLocalStream(null);
     setRemoteStream(null);
     setCall(null);
     setConnected(false);
+    setRelayUp(false);
+    setSending(null);
+    setMyStatus(null);
+    setTheirStatus(null);
     setStatus('Offline');
     setUnlocked(false);
     setActive(null);
     setScreen('list');
-  }, []);
+  }, [setCall]);
 
   // Leaving the foreground closes everything, if asked to.
   //
   // Deliberately 'background' and not "anything but active": Android reports
-  // 'inactive' while a permission dialog is on screen, and locking the vault
-  // the instant someone taps Allow on the microphone prompt would make calls
-  // impossible to answer. Hiding the app from the recents switcher is handled
-  // by the screenshot block instead.
+  // 'inactive' while a permission dialog is on screen, and locking the vault the
+  // instant someone taps Allow on the microphone prompt would make calls
+  // impossible to answer.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'background' && unlocked && settings.panicOnBackground) lock();
@@ -117,49 +155,150 @@ export default function App() {
     }
   }, [unlocked, settings.blockScreenshots]);
 
+  // ---- receiving ---------------------------------------------------------
+  const markDelivered = useCallback((id: string, delivery: Msg['delivery']) => {
+    setMessages((m) => m.map((x) => (x.id === id ? { ...x, delivery } : x)));
+  }, []);
+
+  /** The one place an inbound envelope becomes something on screen. */
+  const applyEnvelope = useCallback((e: Envelope, at = Date.now()) => {
+    switch (e.k) {
+      case 'msg': {
+        if (seenRef.current.has(e.id)) return; // arrived twice; show it once
+        seenRef.current.add(e.id);
+        setMessages((m) => {
+          const next = [...m, { id: e.id, kind: 'in' as const, body: e.body, at: e.at || at }];
+          persistHistory(next);
+          return next;
+        });
+        // Receipt travels whichever road is open.
+        if (!peerRef.current?.send({ k: 'ack', id: e.id })) sigRef.current?.ack(e.id);
+        return;
+      }
+      case 'ack': {
+        outboxRef.current = outboxRef.current.filter((p) => p.id !== e.id);
+        persistOutbox();
+        markDelivered(e.id, 'delivered');
+        return;
+      }
+      case 'status':
+        setTheirStatus({ text: e.text, at: e.at, expiresAt: e.expiresAt });
+        return;
+      case 'status-clear':
+        setTheirStatus(null);
+        return;
+      case 'call': {
+        if (e.action === 'ring') {
+          setCall({ kind: e.callKind ?? 'audio', state: 'incoming' });
+          setScreen('call');
+        } else if (e.action === 'accept') {
+          const c = callRef.current;
+          if (c) {
+            setCall({ ...c, state: 'active' });
+            peerRef.current?.openMedia(c.kind).catch(() => {});
+          }
+        } else {
+          peerRef.current?.closeMedia();
+          setCall(null);
+          setScreen('chat');
+          pushSystem(e.action === 'decline' ? 'Call declined.' : 'Call ended.');
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }, [markDelivered, persistHistory, persistOutbox, pushSystem, setCall]);
+
+  // ---- sending -----------------------------------------------------------
+  /**
+   * Send text. Straight down the channel when the partner is here, into the
+   * relay's mailbox when they are not, and kept in our own outbox either way
+   * until their phone confirms it.
+   */
+  const sendText = useCallback((body: string) => {
+    const peer = peerRef.current;
+    const sig = sigRef.current;
+    if (!peer) return;
+
+    const id = newId();
+    const at = Date.now();
+    // Sealed once; both roads carry the identical bytes.
+    const wire = peer.wrap({ k: 'msg', id, body, at });
+
+    setMessages((m) => {
+      const next: Msg[] = [...m, { id, kind: 'out', body, at, delivery: 'sending' }];
+      persistHistory(next);
+      return next;
+    });
+
+    outboxRef.current = [...outboxRef.current, { id, wire, at }];
+    persistOutbox();
+
+    // Direct if we can, mailbox if we cannot, and the outbox covers neither.
+    if (!peer.sendWire(wire)) sig?.mail(id, wire);
+  }, [persistHistory, persistOutbox]);
+
+  /** Re-post anything the partner never acknowledged. */
+  const flushOutbox = useCallback(() => {
+    const sig = sigRef.current;
+    const peer = peerRef.current;
+    for (const p of outboxRef.current) {
+      if (peer?.sendWire(p.wire)) continue;
+      sig?.mail(p.id, p.wire);
+    }
+  }, []);
+
   // ---- transport ---------------------------------------------------------
   const buildPeer = useCallback((keys: VaultKeys, cfg: VaultSettings, role: Role) => {
     const peer = new Peer(role, cfg.iceServers, keys.msgKey, (m) => sigRef.current?.send(m), {
       onChannelOpen: (open) => {
         setConnected(open);
         setStatus(open ? 'Connected, direct' : 'Waiting for partner…');
-        if (open) pushSystem('Connected directly. Nothing is being stored.');
+        if (!open) return;
+        pushSystem('Connected directly.');
+        flushOutbox();
+        const mine = myStatusRef.current;
+        if (isLive(mine)) {
+          peer.send({ k: 'status', text: mine.text, at: mine.at, expiresAt: mine.expiresAt });
+        }
       },
-      onMessage: (text, at) => setMessages((m) => [...m, mkMsg('in', text, at)]),
+      onEnvelope: (e) => applyEnvelope(e),
+      onMedia: (id, kind, uri, mime, bytes, at, duration) => {
+        if (seenRef.current.has(id)) return;
+        seenRef.current.add(id);
+        setMessages((m) => [
+          ...m.filter((x) => x.id !== id),
+          { id, kind: 'in', body: '', at, media: { kind, uri, mime, bytes, duration } },
+        ]);
+      },
+      onMediaProgress: (id, progress) => {
+        setMessages((m) =>
+          m.some((x) => x.id === id)
+            ? m.map((x) => (x.id === id ? { ...x, progress } : x))
+            : [...m, { id, kind: 'in' as const, body: '', at: Date.now(), progress }],
+        );
+      },
       onLocalStream: setLocalStream,
       onRemoteStream: setRemoteStream,
       onConnectionState: (cs) => {
         if (cs === 'failed') setStatus('Could not find a direct path');
         else if (cs === 'connected') setStatus('Connected, direct');
       },
-      onCallSignal: (action, kind) => {
-        if (action === 'ring') {
-          setCall({ kind: kind ?? 'audio', state: 'incoming' });
-          setScreen('call');
-        } else if (action === 'accept') {
-          // The caller only reaches for the camera once the other side says yes.
-          const c = callRef.current;
-          if (c) {
-            setCall({ ...c, state: 'active' });
-            peerRef.current?.openMedia(c.kind).catch(() => {});
-          }
-        } else if (action === 'decline' || action === 'hangup') {
-          peerRef.current?.closeMedia();
-          setCall(null);
-          setScreen('chat');
-          pushSystem(action === 'decline' ? 'Call declined.' : 'Call ended.');
-        }
-      },
     });
     peerRef.current = peer;
     return peer;
-  }, [pushSystem, setCall]);
+  }, [applyEnvelope, flushOutbox, pushSystem]);
 
   const connect = useCallback((keys: VaultKeys, cfg: VaultSettings) => {
     const sig = new Signaling(cfg.relayUrl, keys.roomId, keys.msgKey, {
       onReady: (role) => {
         roleRef.current = role;
+        setRelayUp(true);
         if (!peerRef.current) buildPeer(keys, cfg, role);
+        // Unacknowledged mail goes back out as soon as there is a relay,
+        // whether or not the partner is here to take it directly.
+        flushOutbox();
       },
       onPeerPresent: (present) => {
         if (present) {
@@ -167,6 +306,7 @@ export default function App() {
           peerRef.current?.start();
         } else {
           setConnected(false);
+          setTheirStatus(null);
           peerRef.current?.destroy();
           peerRef.current = null;
           setRemoteStream(null);
@@ -179,17 +319,50 @@ export default function App() {
       onClosed: (reason) => {
         setStatus(reason);
         setConnected(false);
+        setRelayUp(false);
+      },
+      onMail: (id, wire, at) => {
+        // Still sealed at this point; only we hold the key.
+        const peer = peerRef.current;
+        if (!peer) return;
+        const e = peer.unwrap(wire);
+        if (e) applyEnvelope(e, at);
+      },
+      onMailDone: (count) => {
+        if (count > 0) {
+          pushSystem(`${count} message${count === 1 ? '' : 's'} arrived while you were away.`);
+        }
+      },
+      onMailHeld: (id) => markDelivered(id, 'held'),
+      onMailFull: (id) => markDelivered(id, 'failed'),
+      onAck: (id) => {
+        outboxRef.current = outboxRef.current.filter((p) => p.id !== id);
+        persistOutbox();
+        markDelivered(id, 'delivered');
       },
     });
     sigRef.current = sig;
     sig.connect();
-  }, [buildPeer]);
+  }, [applyEnvelope, buildPeer, flushOutbox, markDelivered, persistOutbox, pushSystem, setCall]);
 
   const enterVault = useCallback(async (keys: VaultKeys) => {
     keysRef.current = keys;
     const cfg = await readSettings(keys.msgKey);
     setSettings(cfg);
-    setMessages([]);
+    settingsRef.current = cfg;
+
+    const [history, outbox, mine] = await Promise.all([
+      cfg.keepHistory ? loadHistory(keys.msgKey) : Promise.resolve([] as Msg[]),
+      loadOutbox(keys.msgKey),
+      loadStatus(keys.msgKey),
+    ]);
+
+    history.forEach((m) => seenRef.current.add(m.id));
+    outboxRef.current = outbox;
+    setMessages(history);
+    setMyStatus(mine);
+    myStatusRef.current = mine;
+
     setUnlocked(true);
     setScreen('chat');
     connect(keys, cfg);
@@ -237,38 +410,117 @@ export default function App() {
     setScreen('list');
   };
 
+  // ---- media -------------------------------------------------------------
+  /**
+   * Media only ever goes down the direct channel.
+   *
+   * Text can wait in the relay's mailbox because it is small and the relay
+   * cannot read it. A photo is neither of those things by the same margin, and
+   * queueing pictures on someone else's server is exactly what this app exists
+   * to avoid — so if the partner is not here, we say so rather than storing it.
+   */
+  const shipMedia = useCallback(async (
+    kind: MediaKind,
+    get: () => Promise<{ b64: string; mime: string; bytes: number; duration?: number } | null>,
+  ) => {
+    const peer = peerRef.current;
+    if (!peer?.isOpen) {
+      Alert.alert(
+        'Not connected',
+        'Photos, video and voice notes go straight between the phones, so you both need to be in the app. Text can wait for them; pictures cannot.',
+      );
+      return;
+    }
+
+    let picked;
+    try {
+      picked = await get();
+    } catch (err) {
+      Alert.alert(
+        err instanceof TooLarge ? 'Too big' : 'Could not read that',
+        err instanceof TooLarge
+          ? 'That file is too large to send. Try a shorter video.'
+          : 'Something went wrong getting that file.',
+      );
+      return;
+    }
+    if (!picked) return;
+
+    const id = newId();
+    const at = Date.now();
+    const uri = `data:${picked.mime};base64,${picked.b64}`;
+    setMessages((m) => [
+      ...m,
+      {
+        id, kind: 'out', body: '', at, delivery: 'sending', progress: 0,
+        media: {
+          kind, uri, mime: picked.mime, bytes: picked.bytes, duration: picked.duration,
+        },
+      },
+    ]);
+    setSending({ id, progress: 0 });
+
+    const ok = await peer.sendMedia(
+      id, kind, picked.b64, picked.mime, picked.bytes, picked.duration,
+      (p) => {
+        setSending({ id, progress: p });
+        setMessages((m) => m.map((x) => (x.id === id ? { ...x, progress: p } : x)));
+      },
+    );
+
+    setSending(null);
+    setMessages((m) =>
+      m.map((x) =>
+        x.id === id ? { ...x, progress: undefined, delivery: ok ? 'delivered' : 'failed' } : x,
+      ),
+    );
+  }, []);
+
+  // ---- status ------------------------------------------------------------
+  const updateStatus = useCallback(async (text: string) => {
+    const keys = keysRef.current;
+    if (!keys) return;
+    const s = await saveStatus(keys.msgKey, text);
+    setMyStatus(s);
+    myStatusRef.current = s;
+    peerRef.current?.send(
+      s ? { k: 'status', text: s.text, at: s.at, expiresAt: s.expiresAt } : { k: 'status-clear' },
+    );
+  }, []);
+
   // ---- calls -------------------------------------------------------------
   const startCall = (kind: CallKind) => {
     if (!connected) return;
     setCall({ kind, state: 'outgoing' });
     setMuted(false);
     setCameraOff(false);
-    peerRef.current?.signalCall('ring', kind);
+    peerRef.current?.send({ k: 'call', action: 'ring', callKind: kind });
     setScreen('call');
   };
 
   const declineCall = () => {
-    peerRef.current?.signalCall('decline');
+    peerRef.current?.send({ k: 'call', action: 'decline' });
     peerRef.current?.closeMedia();
     setCall(null);
     setScreen('chat');
   };
 
   const acceptCall = async () => {
-    if (!call) return;
+    const c = callRef.current;
+    if (!c) return;
     try {
-      await peerRef.current?.openMedia(call.kind);
+      await peerRef.current?.openMedia(c.kind);
     } catch {
       Alert.alert('Permission needed', 'Allow microphone and camera access to take calls.');
       declineCall();
       return;
     }
-    peerRef.current?.signalCall('accept', call.kind);
-    setCall({ ...call, state: 'active' });
+    peerRef.current?.send({ k: 'call', action: 'accept', callKind: c.kind });
+    setCall({ ...c, state: 'active' });
   };
 
   const hangUp = () => {
-    peerRef.current?.signalCall('hangup');
+    peerRef.current?.send({ k: 'call', action: 'hangup' });
     peerRef.current?.closeMedia();
     setCall(null);
     setScreen('chat');
@@ -315,8 +567,18 @@ export default function App() {
           pairingPhrase={bytesToWords(keysRef.current.pairing)}
           onSave={async (next) => {
             const keys = keysRef.current;
+            const wasKeeping = settingsRef.current.keepHistory;
             setSettings(next);
+            settingsRef.current = next;
             if (keys) await writeSettings(keys.msgKey, next);
+
+            // Turning history off takes the existing log with it — otherwise
+            // the switch says one thing and the disk says another.
+            if (wasKeeping && !next.keepHistory) await clearHistory();
+            if (!wasKeeping && next.keepHistory && keys) {
+              await saveHistory(keys.msgKey, messagesRef.current);
+            }
+
             // Reconnect so a changed relay or ICE list takes effect now.
             peerRef.current?.destroy();
             peerRef.current = null;
@@ -328,6 +590,9 @@ export default function App() {
           }}
           onDestroy={async () => {
             await destroyVault();
+            await clearHistory();
+            await clearOutbox();
+            await clearStatus();
             setHasVault(false);
             lock();
           }}
@@ -342,11 +607,16 @@ export default function App() {
           messages={messages}
           status={status}
           connected={connected}
-          onSend={(text) => {
-            if (peerRef.current?.sendMessage(text)) {
-              setMessages((m) => [...m, mkMsg('out', text)]);
-            }
-          }}
+          relayUp={relayUp}
+          keepHistory={settings.keepHistory}
+          myStatus={myStatus}
+          theirStatus={theirStatus}
+          sending={sending}
+          onSend={sendText}
+          onSetStatus={updateStatus}
+          onPickPhoto={(camera) => shipMedia('photo', () => pickPhoto(camera))}
+          onPickVideo={(camera) => shipMedia('video', () => pickVideo(camera))}
+          onSendRecording={(uri, seconds) => shipMedia('audio', () => readRecording(uri, seconds))}
           onCall={startCall}
           onLock={lock}
           onSettings={() => setScreen('settings')}

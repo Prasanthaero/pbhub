@@ -23,6 +23,7 @@ export default function VaultSettingsScreen({
   const [ice, setIce] = useState(JSON.stringify(settings.iceServers, null, 2));
   const [panic, setPanic] = useState(settings.panicOnBackground);
   const [block, setBlock] = useState(settings.blockScreenshots);
+  const [keep, setKeep] = useState(settings.keepHistory);
   const [err, setErr] = useState('');
 
   const save = () => {
@@ -35,7 +36,13 @@ export default function VaultSettingsScreen({
     }
     const url = relayUrl.trim();
     if (!/^wss?:\/\//i.test(url)) return setErr('Relay must start with wss:// or ws://');
-    onSave({ relayUrl: url, iceServers: parsed, panicOnBackground: panic, blockScreenshots: block });
+    onSave({
+      relayUrl: url,
+      iceServers: parsed,
+      panicOnBackground: panic,
+      blockScreenshots: block,
+      keepHistory: keep,
+    });
   };
 
   const confirmDestroy = () =>
@@ -95,6 +102,25 @@ export default function VaultSettingsScreen({
         <TouchableOpacity onPress={() => setIce(JSON.stringify(DEFAULT_ICE, null, 2))}>
           <Text style={s.link}>Reset to default</Text>
         </TouchableOpacity>
+
+        <Text style={s.section}>The conversation</Text>
+        <View style={s.rowItem}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={s.rowTitle}>Keep chat on this phone</Text>
+            <Text style={s.rowSub}>
+              Off, the chat lives only while the app is open and closing it erases the conversation
+              from both phones. On, the messages are written here encrypted so they are waiting
+              next time — which is what most people expect, and more for anyone holding your phone
+              to find. Photos and voice notes are never kept either way.
+            </Text>
+          </View>
+          <Switch value={keep} onValueChange={setKeep} />
+        </View>
+        <Text style={s.help}>
+          Messages sent while your partner is away wait on the relay as ciphertext it cannot read,
+          and are handed over the moment they open the app. Photos, video and voice notes never
+          wait anywhere — you both have to be here for those.
+        </Text>
 
         <Text style={s.section}>Safety</Text>
         <View style={s.rowItem}>

@@ -34,6 +34,17 @@ export type VaultSettings = {
   panicOnBackground: boolean;
   /** Block screenshots and hide the app in the recents switcher. */
   blockScreenshots: boolean;
+  /**
+   * Keep the conversation on this phone between sessions.
+   *
+   * Off, the app behaves as it always has: the chat lives in memory and closing
+   * it erases the conversation from both phones. On, the text is written here
+   * encrypted so it is waiting when you come back — which is what most people
+   * mean by a chat app, and a real change in what a seized phone gives up.
+   *
+   * Media is never kept either way.
+   */
+  keepHistory: boolean;
 };
 
 export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
@@ -41,6 +52,7 @@ export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
   iceServers: DEFAULT_ICE,
   panicOnBackground: true,
   blockScreenshots: true,
+  keepHistory: false,
 });
 
 export async function readMarker(): Promise<VaultBlob | null> {
@@ -56,9 +68,13 @@ export async function writeMarker(blob: VaultBlob): Promise<void> {
   await AsyncStorage.setItem(MARKER_KEY, JSON.stringify(blob));
 }
 
-/** Destroy the vault outright. Afterwards the app is only ever a notes app. */
+/** Destroy the vault outright. Afterwards the app is only ever a notes app.
+ *  Everything the vault ever wrote goes with it — settings, history, the
+ *  outbox and the status — or the leftovers would say what the app really is. */
 export async function destroyVault(): Promise<void> {
-  await AsyncStorage.multiRemove([MARKER_KEY, SETTINGS_KEY]);
+  await AsyncStorage.multiRemove([
+    MARKER_KEY, SETTINGS_KEY, '@nt/log', '@nt/pending', '@nt/mood',
+  ]);
 }
 
 export async function readSettings(key: Uint8Array): Promise<VaultSettings> {
