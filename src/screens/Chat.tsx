@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Image, ScrollView,
-  StatusBar, ActivityIndicator, Modal, Alert,
+  StatusBar, ActivityIndicator, Modal, Alert, Platform, Dimensions, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboardInset } from './useKeyboardInset';
@@ -161,11 +161,27 @@ export default function Chat({
    * A real build has nothing to do here — the activity already sits above the
    * navigation bar. As a guest in Expo Go the app draws to the very bottom of
    * the screen, which put the message box and Send button half behind the
-   * navigation buttons. The keyboard, when it is up, covers that bar anyway, so
-   * it is whichever of the two is taller, never both.
+   * navigation buttons.
+   *
+   * Three readings, largest wins, because no single one of them can be trusted
+   * in that position: the safe-area inset, which is right when the provider has
+   * measured and zero when it has not; the gap between the screen and the
+   * window, which is right when the window is not drawing edge to edge; and a
+   * floor, because every Android phone has a bar or a gesture strip down there
+   * and none of them is thinner than this. Then a little more on top, so the
+   * Send button is clearly above the buttons rather than touching them.
+   *
+   * The keyboard, when it is up, covers that bar anyway — so it is whichever of
+   * the two is taller, never both.
    */
   const safeBottom = useSafeAreaInsets().bottom;
-  const bottomPad = inExpoGo ? Math.max(inset, safeBottom) : inset;
+  const win = useWindowDimensions();
+  const systemBars = Math.max(
+    0,
+    Dimensions.get('screen').height - win.height - (StatusBar.currentHeight ?? 0),
+  );
+  const navBar = Math.max(safeBottom, systemBars, Platform.OS === 'android' ? 28 : 0);
+  const bottomPad = inExpoGo ? Math.max(inset, navBar) + 10 : inset;
 
   const listRef = useRef<FlatList<Msg>>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
