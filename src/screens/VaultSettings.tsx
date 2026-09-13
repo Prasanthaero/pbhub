@@ -125,9 +125,9 @@ export default function VaultSettingsScreen({
           <Switch value={keep} onValueChange={setKeep} />
         </View>
         <Text style={s.help}>
-          Messages sent while your partner is away wait on the relay as ciphertext it cannot read,
-          and are handed over the moment they open the app. Photos, video and voice notes never
-          wait anywhere — you both have to be here for those.
+          Messages, photos and voice notes sent while your partner is away wait on the relay as
+          ciphertext it cannot read, and are handed over the moment they open the app, then deleted.
+          Long videos are the exception — you both have to be here for those.
         </Text>
 
         <View style={s.rowItem}>
