@@ -1,0 +1,72 @@
+{
+  "expo": {
+    "name": "Notes",
+    "slug": "pbhub",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "notes",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFDF6"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pb.notes",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Attach photos to your notes.",
+        "NSMicrophoneUsageDescription": "Record voice memos for your notes.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.pb.notes",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundColor": "#FFFDF6"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_CONNECT"
+      ]
+    },
+    "plugins": [
+      "expo-dev-client",
+      "@config-plugins/react-native-webrtc",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "enableProguardInReleaseBuilds": true,
+            "usesCleartextTraffic": false
+          }
+        }
+      ],
+      "./plugins/withReleaseSigning"
+    ]
+  }
+}

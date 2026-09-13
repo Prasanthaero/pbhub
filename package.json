@@ -1,0 +1,41 @@
+{
+  "name": "pbhub",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@config-plugins/react-native-webrtc": "^15.0.2",
+    "@noble/ciphers": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~57.0.22",
+    "expo-build-properties": "~57.0.17",
+    "expo-crypto": "~57.0.3",
+    "expo-dev-client": "~57.0.19",
+    "expo-screen-capture": "~57.0.3",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-get-random-values": "~1.11.0",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-webrtc": "^124.0.8"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "postinstall": "node scripts/fix-webrtc-types.cjs",
+    "typecheck": "tsc --noEmit",
+    "relay:dev": "node server/index.js",
+    "android:build": "expo run:android --variant release",
+    "test:crypto": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-crypto.mjs",
+    "test:signaling": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-signaling.mjs",
+    "test": "npm run test:crypto && npm run test:signaling",
+    "icons": "node scripts/make-icons.cjs"
+  },
+  "private": true
+}

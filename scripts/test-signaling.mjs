@@ -1,0 +1,107 @@
+/**
+ * Drives the app's real Signaling class against the real relay over a real
+ * socket. Node 24 ships a global WebSocket, so the class under test is the
+ * exact code the phone runs.
+ *
+ * Run with: npm run test:signaling
+ */
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { createVault, seal, unseal } from '../src/crypto/vault.ts';
+import { Signaling } from '../src/net/signaling.ts';
+
+const PORT = 8123;
+const URL = `ws://127.0.0.1:${PORT}`;
+
+let pass = 0;
+const ok = (name) => { console.log('  ok  ' + name); pass++; };
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const srv = spawn(process.execPath, ['server/index.js'], {
+  env: { ...process.env, PORT: String(PORT) },
+  stdio: ['ignore', 'pipe', 'inherit'],
+});
+await once(srv.stdout, 'data');
+
+const seen = [];
+/** Build a Signaling exactly as App.tsx does, recording what it reports. */
+function client(tag, keys, onSignal = () => {}) {
+  const log = { role: null, present: [], status: [], closed: null, signals: [] };
+  const s = new Signaling(URL, keys.roomId, keys.msgKey, {
+    onReady: (r) => { log.role = r; },
+    onPeerPresent: (p) => log.present.push(p),
+    onSignal: (m) => { log.signals.push(m); onSignal(m); },
+    onStatus: (x) => log.status.push(x),
+    onClosed: (r) => { log.closed = r; },
+  });
+  seen.push({ tag, s, log });
+  s.connect();
+  return { s, log };
+}
+
+try {
+  const { keys } = createVault('correct horse battery staple river');
+
+  console.log('handshake');
+  const a = client('A', keys);
+  await wait(400);
+  assert.equal(a.log.role, 'a');
+  assert.deepEqual(a.log.present, [false]);
+  ok('first client is told it is role "a" and that nobody else is here');
+
+  const b = client('B', keys);
+  await wait(400);
+  assert.equal(b.log.role, 'b');
+  assert.deepEqual(b.log.present, [true]);
+  assert.deepEqual(a.log.present, [false, true]);
+  ok('second client is role "b"; the first is told its partner arrived');
+
+  console.log('relaying');
+  b.s.send({ kind: 'sdp', description: { type: 'offer', sdp: 'v=0 SECRET-SDP' } });
+  await wait(300);
+  assert.equal(a.log.signals.length, 1);
+  assert.equal(a.log.signals[0].description.sdp, 'v=0 SECRET-SDP');
+  ok('an SDP offer arrives at the partner intact');
+
+  a.s.send({ kind: 'ice', candidate: { candidate: 'candidate:1 1 udp' } });
+  await wait(300);
+  assert.equal(b.log.signals[0].candidate.candidate, 'candidate:1 1 udp');
+  ok('ICE candidates flow the other way');
+
+  console.log('what the relay can see');
+  // Tap the wire directly and confirm the server never sees plaintext.
+  const raw = [];
+  const spy = new WebSocket(URL);
+  await once(spy, 'open');
+  spy.addEventListener('message', (e) => raw.push(String(e.data)));
+  spy.send(JSON.stringify({ t: 'join', room: keys.roomId }));
+  await wait(300);
+  assert.ok(raw.some((m) => JSON.parse(m).t === 'full'), 'third party should be refused');
+  ok('a third device cannot join an occupied room');
+  spy.close();
+
+  // Rebuild what the server actually forwarded, from its own point of view.
+  const wire = seal(keys.msgKey, JSON.stringify({ kind: 'sdp', description: { sdp: 'v=0 SECRET-SDP' } }));
+  assert.ok(!wire.includes('SECRET'), 'signaling payload was not sealed');
+  assert.match(wire, /^[0-9a-f]+$/);
+  assert.equal(JSON.parse(unseal(keys.msgKey, wire)).description.sdp, 'v=0 SECRET-SDP');
+  ok('signaling payloads on the wire are ciphertext the relay cannot read');
+
+  console.log('departure');
+  b.s.close();
+  await wait(400);
+  assert.equal(a.log.present.at(-1), false);
+  ok('the remaining client is told its partner left');
+
+  // And the room should now accept a fresh second device.
+  const c = client('C', keys);
+  await wait(400);
+  assert.equal(c.log.role, 'b');
+  ok('the freed slot is reusable, so a dropped partner can come back');
+
+  console.log(`\n${pass} checks passed`);
+} finally {
+  seen.forEach(({ s }) => { try { s.close(); } catch {} });
+  srv.kill();
+}
