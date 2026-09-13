@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, Image, ScrollView,
-  KeyboardAvoidingView, Platform, StatusBar, ActivityIndicator, Modal, Alert,
+  StatusBar, ActivityIndicator, Modal, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useKeyboardInset } from './useKeyboardInset';
 import {
   useAudioRecorder, useAudioPlayer, RecordingPresets,
   setAudioModeAsync, requestRecordingPermissionsAsync,
@@ -150,9 +151,21 @@ export default function Chat({
   /** Hide the status row while the keyboard is up, so the chat keeps the room. */
   const [typing, setTyping] = useState(false);
 
+  /** How far the message box has to rise to clear the keyboard. */
+  const { inset, onLayout } = useKeyboardInset();
+
   const listRef = useRef<FlatList<Msg>>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recStarted = useRef(0);
+
+  // When the keyboard opens, the last message should still be the one you are
+  // looking at — not scrolled off behind it.
+  useEffect(() => {
+    if (inset > 0) {
+      const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+      return () => clearTimeout(t);
+    }
+  }, [inset]);
 
   const mine = myStatuses.filter(isLiveItem);
   const theirs = theirStatuses.filter(isLiveItem);
@@ -347,22 +360,16 @@ export default function Chat({
         <View style={s.notPaired}>
           <Text style={s.notPairedTitle}>Not paired yet</Text>
           <Text style={s.notPairedBody}>
-            Your partner has never connected on this code. If you both made your own code, you are
-            each in a different room and will wait forever. Only one of you makes it — the other
-            scans it or types the same eight words. Check Settings (•••) shows the same short code
-            on both phones.
+            One of you makes the code, the other scans it. Both phones must show the same code
+            under •••.
           </Text>
         </View>
       )}
 
-      {/* On Android the window itself resizes (edge-to-edge is off), so this
-          must do nothing there; only iOS needs it to pad. Having both act at
-          once is what lifted the composer above the keyboard. */}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        enabled={Platform.OS === 'ios'}
-      >
+      {/* The message box rides above the keyboard. See useKeyboardInset — the
+          lift is measured rather than assumed, because newer Androids no longer
+          resize the window and the box would otherwise sit underneath the keys. */}
+      <View style={{ flex: 1, paddingBottom: inset }} onLayout={onLayout}>
         <FlatList
           ref={listRef}
           data={messages}
@@ -371,9 +378,7 @@ export default function Chat({
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
           ListHeaderComponent={
             <Text style={s.preamble}>
-              {keepHistory
-                ? 'This chat is kept on your phone, encrypted. Photos and voice notes never are.'
-                : 'Nothing here is saved. Close the app and this conversation is gone from both phones.'}
+              {keepHistory ? 'Kept on this phone, encrypted.' : 'Nothing here is saved.'}
             </Text>
           }
           renderItem={({ item }) => {
@@ -472,7 +477,7 @@ export default function Chat({
             </TouchableOpacity>
           </View>
         )}
-      </KeyboardAvoidingView>
+      </View>
 
       {/* ---- story viewer ---- */}
       <Modal

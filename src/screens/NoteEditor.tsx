@@ -53,9 +53,13 @@ export default function NoteEditor({ note, onSave, onDelete, onCancel }: Props) 
         </View>
       </View>
 
+      {/* iOS only: on Android the activity pads itself by the keyboard inset
+          (plugins/withKeyboardInsets.js), and a second adjustment on top of that
+          would move the page twice. */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled={Platform.OS === 'ios'}
       >
         <TextInput
           style={s.title}

@@ -52,8 +52,7 @@
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_CONNECT"
       ],
-      "allowBackup": false,
-      "edgeToEdgeEnabled": false
+      "allowBackup": false
     },
     "plugins": [
       "@config-plugins/react-native-webrtc",
@@ -94,6 +93,7 @@
           "sounds": []
         }
       ],
+      "./plugins/withKeyboardInsets",
       "./plugins/withAbiSplits"
     ],
     "scheme": "notes"
