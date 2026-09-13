@@ -5,7 +5,9 @@ import * as ScreenCapture from 'expo-screen-capture';
 import type { MediaStream } from 'react-native-webrtc';
 
 import { T } from './src/theme';
-import { openVault, createVault, wipe, type VaultKeys } from './src/crypto/vault';
+import {
+  openVault, createVault, wipe, needsRestretch, type VaultKeys,
+} from './src/crypto/vault';
 import { bytesToWords } from './src/crypto/wordlist';
 import {
   readMarker, writeMarker, destroyVault, readSettings, writeSettings,
@@ -484,6 +486,18 @@ export default function App() {
     if (!marker) return false;
     const keys = openVault(marker, candidate);
     if (!keys) return false;
+
+    // Sealed under a round count we no longer use, so unlocking it was slower
+    // than it needs to be. Re-seal it with the current one while the PIN and the
+    // pairing secret are both in hand: same secret, same room, same message key,
+    // so nothing needs re-pairing and nothing already encrypted becomes
+    // unreadable. Not awaited — the vault is open either way, and a write that
+    // fails only means the next unlock is slow again.
+    if (needsRestretch(marker)) {
+      const { blob } = createVault(candidate, keys.pairing);
+      writeMarker(blob).catch(() => {});
+    }
+
     await enterVault(keys);
     return true;
   }, [enterVault]);

@@ -46,11 +46,25 @@ import { randomBytes } from './random';
  * PBKDF2-HMAC-SHA512 at 250,000 rounds: about half a second on a laptop and
  * over a MINUTE on the phone, because SHA-512 needs 64-bit arithmetic that
  * Hermes emulates with pairs of 32-bit operations. SHA-256 uses 32-bit words
- * throughout and measured 5.3s for 120,000 rounds on the same device, so
- * roughly 0.044ms per round. 40,000 rounds is about 1.8s: a real cost to
- * anyone guessing, short enough that unlocking does not feel broken.
+ * throughout, at roughly 0.044ms per round on the phone.
+ *
+ * It was 40,000 rounds — about 1.8 seconds in a release build, and 6.2 seconds
+ * measured on a real phone under Expo Go, which is long enough that people
+ * reasonably think the app has hung. Now 12,000: about half a second, and a
+ * couple of seconds even in a development build.
+ *
+ * What that costs, honestly: almost nothing against the attack that matters.
+ * This protects the stored blob against someone who already has the phone and
+ * can get at its files. Against a six-digit PIN, the whole space is a million
+ * guesses, which dedicated hardware chews through in seconds at either round
+ * count — the rounds are a speed bump for a casual attempt, not a wall. What
+ * actually buys security here is the length of the PIN. One more character is
+ * worth more than tripling this number.
  */
-const PBKDF2_ROUNDS = 40_000;
+const PBKDF2_ROUNDS = 12_000;
+
+/** What vaults made before the count was written down used. */
+const LEGACY_ROUNDS = 40_000;
 
 export type VaultBlob = {
   v: 2;
@@ -60,7 +74,22 @@ export type VaultBlob = {
   nonce: string;
   /** The pairing secret, sealed under the PIN. Indistinguishable from noise. */
   ct: string;
+  /** Rounds used to stretch the PIN. Absent on older vaults, which all used
+   *  LEGACY_ROUNDS — recorded now so the number can change again without
+   *  stranding anybody. */
+  c?: number;
 };
+
+/**
+ * Whether this vault was sealed with a different round count than we now use.
+ *
+ * True means it can be re-sealed after a successful unlock — same pairing
+ * secret, same room, same message key, so nothing needs re-pairing and nothing
+ * already encrypted becomes unreadable. One slow unlock, then fast.
+ */
+export function needsRestretch(blob: VaultBlob): boolean {
+  return (blob.c ?? LEGACY_ROUNDS) !== PBKDF2_ROUNDS;
+}
 
 export type VaultKeys = {
   /** Rendezvous id handed to the relay. 128 bits of randomness. */
@@ -79,15 +108,15 @@ export const fromHex = hexToBytes;
 const utf8 = utf8ToBytes;
 
 /** Deliberately slow. Only ever runs on an explicit submit, behind a spinner. */
-function stretchPin(pin: string, salt: Uint8Array): Uint8Array {
+function stretchPin(pin: string, salt: Uint8Array, rounds = PBKDF2_ROUNDS): Uint8Array {
   const t0 = Date.now();
   const out = pbkdf2(sha256, utf8(pin.normalize('NFKC').trim()), salt, {
-    c: PBKDF2_ROUNDS,
+    c: rounds,
     dkLen: 32,
   });
   // Duration only — never the PIN, never the key. Lets the round count be
   // checked against a real device instead of a desktop guess.
-  console.log(`[kdf] ${PBKDF2_ROUNDS} rounds in ${Date.now() - t0}ms`);
+  console.log(`[kdf] ${rounds} rounds in ${Date.now() - t0}ms`);
   return out;
 }
 
@@ -110,12 +139,14 @@ function deriveShared(secret: Uint8Array): VaultKeys {
 export function createVault(
   pin: string,
   secret: Uint8Array,
+  /** Only the tests pass this, to build a vault as an older version would. */
+  rounds: number = PBKDF2_ROUNDS,
 ): { blob: VaultBlob; keys: VaultKeys } {
   const salt = randomBytes(16);
   const nonce = randomBytes(24);
-  const ct = xchacha20poly1305(stretchPin(pin, salt), nonce).encrypt(secret);
+  const ct = xchacha20poly1305(stretchPin(pin, salt, rounds), nonce).encrypt(secret);
   return {
-    blob: { v: 2, salt: toHex(salt), nonce: toHex(nonce), ct: toHex(ct) },
+    blob: { v: 2, salt: toHex(salt), nonce: toHex(nonce), ct: toHex(ct), c: rounds },
     keys: deriveShared(secret),
   };
 }
@@ -129,7 +160,7 @@ export function createVault(
  */
 export function openVault(blob: VaultBlob, candidate: string): VaultKeys | null {
   try {
-    const key = stretchPin(candidate, fromHex(blob.salt));
+    const key = stretchPin(candidate, fromHex(blob.salt), blob.c ?? LEGACY_ROUNDS);
     const secret = xchacha20poly1305(key, fromHex(blob.nonce)).decrypt(fromHex(blob.ct));
     return deriveShared(secret);
   } catch {

@@ -3,7 +3,9 @@
  * Run with: npm run test:crypto
  */
 import assert from 'node:assert/strict';
-import { createVault, openVault, seal, unseal } from '../src/crypto/vault.ts';
+import {
+  createVault, openVault, seal, unseal, needsRestretch,
+} from '../src/crypto/vault.ts';
 import {
   generatePairingSecret, bytesToWords, wordsToBytes, PAIRING_BYTES,
 } from '../src/crypto/wordlist.ts';
@@ -169,6 +171,50 @@ ok('anything that is not one of our codes is refused, not half-read');
 
 assert.equal(hex(wordsToBytes(decodePairing(qr))), hex(secret));
 ok('and the bytes that come back out are the same secret');
+
+// ---------------------------------------------------------------------------
+// Changing how hard the PIN is to stretch must not strand anybody. A vault made
+// before the round count was written down has to keep opening, and be quietly
+// upgraded on the way past.
+// ---------------------------------------------------------------------------
+console.log('');
+console.log('changing the round count');
+
+const made = createVault(PIN, secret);
+assert.equal(typeof made.blob.c, 'number');
+assert.equal(needsRestretch(made.blob), false);
+ok('a vault records the round count it was sealed with');
+
+// What an older install has on disk: the same blob with nothing to say about
+// rounds, which means the 40,000 that used to be hardcoded.
+const legacy = { ...made.blob };
+delete legacy.c;
+assert.equal(needsRestretch(legacy), true);
+ok('one without it is recognised as needing re-sealing');
+
+// It was actually sealed at the current count, so reading it as a legacy blob
+// must fail rather than quietly return the wrong bytes.
+assert.equal(openVault(legacy, PIN), null);
+ok('and is read at the old count, not the new one');
+
+const older = createVault(PIN, secret, 40_000);
+delete older.blob.c;
+const fromOld = openVault(older.blob, PIN);
+assert.ok(fromOld, 'a vault from before the change no longer opens');
+assert.equal(hex(fromOld.pairing), hex(secret));
+assert.equal(fromOld.roomId, made.keys.roomId);
+ok("a vault from before the change still opens, on the same room");
+
+// The upgrade the app performs after a successful unlock.
+const upgraded = createVault(PIN, fromOld.pairing);
+assert.equal(needsRestretch(upgraded.blob), false);
+const after = openVault(upgraded.blob, PIN);
+assert.equal(hex(after.pairing), hex(secret));
+assert.equal(after.roomId, made.keys.roomId);
+ok('re-sealing keeps the same secret, room and message key — no re-pairing');
+
+assert.equal(openVault(upgraded.blob, 'wrong'), null);
+ok('and the new blob still refuses the wrong PIN');
 
 console.log(``);
 console.log(`${pass} checks passed`);

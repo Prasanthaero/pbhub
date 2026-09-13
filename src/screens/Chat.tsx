@@ -55,7 +55,7 @@ type Props = {
  * buttons rather than touching them — flush against the keys reads as a box
  * that is about to be swallowed by them.
  */
-const BREATHING_ROOM = 24;
+const BREATHING_ROOM = 40;
 
 const clock = (ts: number) =>
   new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
