@@ -13,20 +13,37 @@ type Props = {
   roomId: string;
   pairingPhrase: string;
   onSave: (s: VaultSettings) => void;
+  /** Re-seal the vault under a new PIN. Resolves false if it was refused. */
+  onChangePin: (next: string) => Promise<boolean>;
   onDestroy: () => void;
   onBack: () => void;
 };
 
 export default function VaultSettingsScreen({
-  settings, roomId, pairingPhrase, onSave, onDestroy, onBack,
+  settings, roomId, pairingPhrase, onSave, onChangePin, onDestroy, onBack,
 }: Props) {
   const [showPairing, setShowPairing] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
+  const [newPin, setNewPin] = useState('');
+  const [newPin2, setNewPin2] = useState('');
+  const [pinMsg, setPinMsg] = useState('');
+
   const [relayUrl, setRelayUrl] = useState(settings.relayUrl);
   const [ice, setIce] = useState(JSON.stringify(settings.iceServers, null, 2));
   const [panic, setPanic] = useState(settings.panicOnBackground);
   const [block, setBlock] = useState(settings.blockScreenshots);
   const [keep, setKeep] = useState(settings.keepHistory);
   const [err, setErr] = useState('');
+
+  const savePin = async () => {
+    if (newPin.trim().length < 4) return setPinMsg('The PIN needs at least 4 characters.');
+    if (newPin !== newPin2) return setPinMsg('The two entries do not match.');
+    if (!(await onChangePin(newPin))) return setPinMsg('Could not change it.');
+    setPinMsg('Changed. Use the new one from now on.');
+    setNewPin('');
+    setNewPin2('');
+    setPinOpen(false);
+  };
 
   const save = () => {
     let parsed: any[];
@@ -154,6 +171,58 @@ export default function VaultSettingsScreen({
           <Switch value={block} onValueChange={setBlock} />
         </View>
 
+        <Text style={s.section}>Your PIN</Text>
+        <Text style={s.help}>
+          What you type into a new note to get in here. It only protects this phone, so changing it
+          does not disturb the pairing, the conversation, or anything already saved — and the other
+          phone's PIN is its own business.
+        </Text>
+
+        {pinOpen ? (
+          <>
+            <TextInput
+              style={s.input}
+              value={newPin}
+              onChangeText={(t) => { setNewPin(t); setPinMsg(''); }}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="new PIN"
+              placeholderTextColor={T.vaultInkSoft}
+              autoFocus
+            />
+            <TextInput
+              style={[s.input, { marginTop: 10 }]}
+              value={newPin2}
+              onChangeText={(t) => { setNewPin2(t); setPinMsg(''); }}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="type it again"
+              placeholderTextColor={T.vaultInkSoft}
+            />
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <TouchableOpacity
+                style={[s.reveal, { flex: 1 }]}
+                onPress={() => { setPinOpen(false); setNewPin(''); setNewPin2(''); setPinMsg(''); }}
+              >
+                <Text style={s.revealText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.reveal, { flex: 1, backgroundColor: T.mine, borderColor: T.mine }]}
+                onPress={savePin}
+              >
+                <Text style={[s.revealText, { color: '#fff' }]}>Change it</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : (
+          <TouchableOpacity style={s.reveal} onPress={() => setPinOpen(true)}>
+            <Text style={s.revealText}>Change the PIN</Text>
+          </TouchableOpacity>
+        )}
+        {!!pinMsg && <Text style={s.pinMsg}>{pinMsg}</Text>}
+
         <Text style={s.section}>Pairing phrase</Text>
         <Text style={s.help}>
           What connects the two phones. You need it to set up the second phone — and again if
@@ -214,6 +283,7 @@ const s = StyleSheet.create({
     color: T.vaultInk, fontSize: 14, borderWidth: 1, borderColor: T.vaultLine,
   },
   link: { color: T.mine, fontSize: 13, marginTop: 8 },
+  pinMsg: { color: T.accent, fontSize: 13, marginTop: 10 },
   rowItem: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: T.vaultLine,

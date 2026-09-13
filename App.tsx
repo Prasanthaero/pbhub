@@ -702,6 +702,27 @@ export default function App() {
     setScreen('chat');
   }, [shared, addStatus]);
 
+  /**
+   * Change the PIN without touching anything else.
+   *
+   * The PIN only ever protected the pairing secret where it sits on this phone,
+   * so changing it is re-sealing that same secret under a new one: new salt,
+   * new nonce, same room, same message key. Nothing needs re-pairing and
+   * nothing already encrypted becomes unreadable — the history, outbox and
+   * statuses are all under the message key, which does not move.
+   *
+   * Being inside the vault is the authorisation. Asking for the old PIN again
+   * would protect against someone holding your unlocked phone, who can already
+   * read everything in it.
+   */
+  const changePin = useCallback(async (next: string): Promise<boolean> => {
+    const keys = keysRef.current;
+    if (!keys || next.trim().length < 4) return false;
+    const { blob } = createVault(next, keys.pairing);
+    await writeMarker(blob);
+    return true;
+  }, []);
+
   // ---- deleting ----------------------------------------------------------
   /**
    * Remove messages from this phone, and optionally from theirs.
@@ -829,6 +850,7 @@ export default function App() {
             if (keys) connect(keys, next);
             setScreen('chat');
           }}
+          onChangePin={changePin}
           onDestroy={async () => {
             await destroyVault();
             await clearHistory();
