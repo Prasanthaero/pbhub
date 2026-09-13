@@ -313,9 +313,10 @@ export default function VaultSettingsScreen({
 
         <Text style={s.section}>ICE servers</Text>
         <Text style={s.help}>
-          STUN lets the phones find a direct path. A public STUN server learns your IP address —
-          self-host coturn if that matters to you. Add a TURN entry here if a strict mobile network
-          blocks the direct path.
+          STUN finds a direct path between the phones; TURN forwards the call when there is not
+          one, which on mobile data is most of the time. Both are on the list already. They learn
+          your IP address and nothing else — the call itself is encrypted end to end, so a server
+          in the middle is carrying noise. Self-host coturn here if even that matters to you.
         </Text>
         <TextInput
           style={[s.input, { height: 130, fontFamily: 'monospace', fontSize: 12 }]}

@@ -29,10 +29,47 @@ export const DEFAULT_RELAY = 'wss://pbhub-7vob.onrender.com';
 /** Shown as placeholder text, so the expected shape is obvious. */
 export const RELAY_EXAMPLE = 'wss://your-relay.onrender.com';
 
+/**
+ * How two phones find a path to each other for a call.
+ *
+ * STUN alone was the bug behind "video call does not connect properly". STUN
+ * only tells a phone what its address looks like from outside; that is enough
+ * when the two can reach each other directly. On mobile data they usually
+ * cannot — carriers put thousands of customers behind one shared address, and
+ * neither phone can open a path to the other. With nothing else on the list
+ * there is no route at all, and the call rings until somebody gives up.
+ *
+ * TURN is the fallback: a server both phones can reach, which forwards the
+ * stream between them. These are Open Relay, a free public TURN service,
+ * offered on 443 as well as the usual ports because a network that blocks
+ * anything unusual rarely blocks 443.
+ *
+ * What a TURN server sees: both phones' addresses, when the call happened and
+ * how much it carried. What it cannot see is the call — WebRTC encrypts audio
+ * and video end to end with DTLS-SRTP, so a relay in the middle forwards noise.
+ * It is only used when no direct path exists; a call on the same wifi will not
+ * touch it.
+ */
 export const DEFAULT_ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  {
+    urls: [
+      'turn:standard.relay.metered.ca:80',
+      'turn:standard.relay.metered.ca:80?transport=tcp',
+      'turn:standard.relay.metered.ca:443',
+      'turns:standard.relay.metered.ca:443?transport=tcp',
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ];
+
+/** True for a stored list that predates TURN being on it. */
+export const stunOnly = (list: any[]): boolean =>
+  Array.isArray(list)
+  && list.length > 0
+  && list.every((e) => !JSON.stringify(e?.urls ?? '').includes('turn'));
 
 export type VaultSettings = {
   relayUrl: string;
@@ -142,6 +179,10 @@ export async function readSettings(key: Uint8Array): Promise<VaultSettings> {
     if (!raw) return defaultSettings();
     const stored = { ...defaultSettings(), ...JSON.parse(unseal(key, raw)) };
     if (!stored.deviceId) stored.deviceId = toHex(randomBytes(16));
+    // A vault set up before TURN was on the list has the old one written into
+    // it, and would go on failing to connect calls forever. Nobody chose that
+    // list — it was only ever the default — so replacing it takes nothing away.
+    if (stunOnly(stored.iceServers)) stored.iceServers = DEFAULT_ICE;
     return stored;
   } catch {
     return defaultSettings();

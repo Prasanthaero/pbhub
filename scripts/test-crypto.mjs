@@ -298,5 +298,37 @@ assert.equal(ttlLabel(24 * 60 * 60 * 1000), '1 day');
 assert.equal(ttlLabel(99), 'Off');
 ok('the timer choices read back as the labels shown in Settings');
 
+// ---------------------------------------------------------------------------
+// Calls need a TURN entry on the ICE list, and a vault set up before there was
+// one has the old list written into it. Getting this wrong means calls keep
+// failing on exactly the phones that were already failing.
+// ---------------------------------------------------------------------------
+const { DEFAULT_ICE, stunOnly } = await import('../src/store/vaultStore.ts');
+
+console.log('');
+console.log('ICE servers');
+
+assert.ok(JSON.stringify(DEFAULT_ICE).includes('turn:'), 'the default has no TURN on it');
+assert.ok(JSON.stringify(DEFAULT_ICE).includes(':443'), 'nothing on 443 for a strict network');
+ok('the default list carries TURN, including a route over 443');
+
+assert.equal(stunOnly(DEFAULT_ICE), false);
+ok('...so it is not mistaken for an old one and replaced every time');
+
+assert.equal(stunOnly([{ urls: 'stun:stun.l.google.com:19302' }]), true);
+assert.equal(stunOnly([
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+]), true);
+ok('the old STUN-only list is recognised and upgraded');
+
+// Someone who typed their own TURN server in must keep it.
+assert.equal(stunOnly([{ urls: 'turn:my-own-coturn.example:3478' }]), false);
+assert.equal(stunOnly([{ urls: ['stun:a.example', 'turns:b.example:443'] }]), false);
+ok('a list somebody chose for themselves is left alone');
+
+assert.equal(stunOnly([]), false);
+ok('an empty list is left alone rather than treated as stale');
+
 console.log(``);
 console.log(`${pass} checks passed`);

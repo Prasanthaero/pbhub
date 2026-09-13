@@ -249,6 +249,37 @@ const sweep = setInterval(() => {
 
 wss.on('close', () => clearInterval(sweep));
 
+/**
+ * Keep the host from putting this to sleep.
+ *
+ * Free hosting stops an instance that has had no inbound request for about
+ * fifteen minutes, and starting it again takes the better part of a minute —
+ * which is exactly what "connecting takes too long" was. A request to our own
+ * public address every ten minutes counts as traffic and keeps it up.
+ *
+ * It costs the whole of the free tier's monthly allowance, since the instance
+ * then never stops. That is the trade: one always-awake relay, or a minute of
+ * waiting whenever you have both been quiet for a quarter of an hour.
+ *
+ * Silent about failures on purpose. If the ping cannot go out, the relay is
+ * still a relay; there is nothing for it to do about it and nothing worth
+ * filling the log with.
+ */
+const SELF = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL;
+if (SELF) {
+  const https = require('https');
+  const http2 = require('http');
+  setInterval(() => {
+    const get = SELF.startsWith('https') ? https.get : http2.get;
+    try {
+      const req = get(`${SELF}/health`, (res) => res.resume());
+      req.on('error', () => {});
+      req.setTimeout(20_000, () => req.destroy());
+    } catch {}
+  }, 10 * 60 * 1000);
+  console.log(`staying awake via ${SELF}/health`);
+}
+
 server.listen(PORT, () => {
   console.log(`relay listening on :${PORT}`);
 });

@@ -343,7 +343,18 @@ export default function App() {
           const c = callRef.current;
           if (c) {
             setCall({ ...c, state: 'active' });
-            peerRef.current?.openMedia(c.kind).catch(() => {});
+            // Already open if we placed the call; this covers the case where it
+            // is not, and says so rather than showing a call with nothing in it.
+            peerRef.current?.openMedia(c.kind).catch(() => {
+              Alert.alert(
+                'Could not start the call',
+                'This phone would not hand over its microphone or camera.',
+              );
+              peerRef.current?.send({ k: 'call', action: 'hangup' });
+              peerRef.current?.closeMedia();
+              setCall(null);
+              setScreen('chat');
+            });
           }
         } else {
           peerRef.current?.closeMedia();
@@ -974,8 +985,30 @@ export default function App() {
   }, [deleteMessages]);
 
   // ---- calls -------------------------------------------------------------
-  const startCall = (kind: CallKind) => {
+  /**
+   * Ask for the camera and microphone before ringing, not after.
+   *
+   * This used to ring first and open the camera only once the other side
+   * accepted — and the failure was swallowed, so on a phone that had never
+   * granted camera access the caller sat on an 'active' call screen with no
+   * video and nothing said. Asking first also means the tracks exist before the
+   * offer goes out, so there is one negotiation instead of two.
+   */
+  const startCall = async (kind: CallKind) => {
     if (!connected) return;
+    try {
+      // The permission dialog takes the app off screen; that must not lock it.
+      leavingOnPurpose.current = true;
+      await peerRef.current?.openMedia(kind);
+    } catch {
+      Alert.alert(
+        'Permission needed',
+        kind === 'video'
+          ? 'Allow the camera and microphone to make a video call.'
+          : 'Allow the microphone to make a call.',
+      );
+      return;
+    }
     setCall({ kind, state: 'outgoing' });
     setMuted(false);
     setCameraOff(false);
