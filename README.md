@@ -232,3 +232,21 @@ scripts/                icon generator, tests
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+## Hardening notes
+
+A few things that are easy to get wrong and are deliberately set here:
+
+- **`allowBackup` is off.** Android's default is to copy app data to the user's
+  Google Drive. That would have shipped the vault marker and every note to a
+  server, which is the exact opposite of the point.
+- **No deep-link scheme.** The app registers no custom URL scheme. A scheme is a
+  visible line in the manifest announcing that this is not an ordinary notes app.
+- **No `expo-dev-client`** in the build, for the same reason — it registers an
+  `exp+pbhub://` scheme that names the project.
+- **No OTA updates.** `expo-updates` is disabled, so the app never phones home to
+  check for a new version.
+- **Cleartext HTTP is blocked** at the platform level.
+- **Storage, media, phone-state, bluetooth and overlay permissions are explicitly
+  removed** from the merged manifest, so transitive dependencies cannot quietly
+  add them back. The app asks for camera, microphone and network. Nothing else.
