@@ -27,6 +27,18 @@ module.exports = () => {
 
   if (isDevBuild) {
     expo.plugins = [...expo.plugins, 'expo-dev-client'];
+
+    /**
+     * A development build installs beside the real app, not over it.
+     *
+     * It is signed with the debug key, so Android would refuse to install it
+     * over the release app, and the only way through would be to uninstall —
+     * taking the vault, the pairing and every note with it. Its own package name
+     * avoids the question entirely: the real app keeps its data, and the test
+     * app is obviously the test app on the home screen.
+     */
+    expo.name = 'Notes (test)';
+    expo.android = { ...expo.android, package: `${base.expo.android.package}.dev` };
   }
 
   return expo;
