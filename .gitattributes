@@ -1,0 +1,13 @@
+# Normalise line endings so the repo stays LF regardless of who checks it out.
+# Without this, every commit from Windows warns about CRLF conversion and the
+# gradle wrapper can be checked out unrunnable.
+* text=auto eol=lf
+
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+*.png   binary
+*.jpg   binary
+*.keystore binary
+*.jks   binary
+*.hbc   binary
