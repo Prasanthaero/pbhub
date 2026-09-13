@@ -32,16 +32,22 @@ export default function NoteEditor({ note, isNew, tryUnlock, onSave, onDelete, o
    * line of a fresh, untitled note, so anything with a title, a second line, or
    * an existing id is saved immediately without touching the KDF.
    *
+   * No spaces, because that is what separates a PIN from a note. It decides
+   * more than speed — see `done` — so the rule has to be one a person can hold
+   * in their head: one word, no spaces, on a new note with no title.
+   *
    * The lower bound is 4 to match the shortest PIN setup will accept. It must
    * never drift above that: a PIN the app allows but this refuses to try would
    * lock someone out of their own vault, with no error to explain why.
    */
+  const candidate = body.trim();
   const looksLikeAttempt =
     isNew &&
     !title.trim() &&
     !body.includes('\n') &&
-    body.trim().length >= 4 &&
-    body.trim().length <= 128;
+    !/\s/.test(candidate) &&
+    candidate.length >= 4 &&
+    candidate.length <= 64;
 
   const done = async () => {
     if (looksLikeAttempt) {
@@ -49,8 +55,25 @@ export default function NoteEditor({ note, isNew, tryUnlock, onSave, onDelete, o
       // Yield a frame so the spinner paints before the KDF blocks the thread.
       await new Promise((r) => setTimeout(r, 30));
       // Vault opened: this text is never written down.
-      if (await tryUnlock(body.trim())) return;
+      if (await tryUnlock(candidate)) return;
+
+      /**
+       * Wrong PIN. Discard it rather than saving it.
+       *
+       * This used to fall through and save, on the theory that a failed attempt
+       * indistinguishable from an ordinary note was good deniability. In
+       * practice it was the opposite: mistype your PIN once and it sits in the
+       * notes list in plain text, one character away from the real one, for
+       * anyone who picks up the phone to read and try. The deniability was
+       * theoretical; the leak was not.
+       *
+       * Nothing is written and nothing is said — the same silence as a wrong
+       * PIN anywhere else. The cost is that a genuine one-word note needs a
+       * title or a second word, which is a small thing to ask and is stated in
+       * the placeholder below.
+       */
       setChecking(false);
+      return onCancel();
     }
     if (!title.trim() && !body.trim()) return onCancel();
     onSave({ ...note, title: title.trim(), body, updatedAt: Date.now() });
@@ -97,6 +120,11 @@ export default function NoteEditor({ note, isNew, tryUnlock, onSave, onDelete, o
           autoCapitalize="none"
           textAlignVertical="top"
         />
+        {looksLikeAttempt && (
+          <Text style={s.hint}>
+            One word on its own is not kept — add a title or a second word to save it as a note.
+          </Text>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -113,6 +141,9 @@ const s = StyleSheet.create({
     fontSize: 24, fontWeight: '700', color: T.ink, paddingHorizontal: 16, paddingVertical: 8,
   },
   body: {
-    flex: 1, fontSize: 16, color: T.ink, paddingHorizontal: 16, lineHeight: 24, paddingBottom: 24,
+    flex: 1, fontSize: 16, color: T.ink, paddingHorizontal: 16, lineHeight: 24, paddingBottom: 8,
+  },
+  hint: {
+    color: T.inkSoft, fontSize: 12, paddingHorizontal: 16, paddingBottom: 16, lineHeight: 17,
   },
 });

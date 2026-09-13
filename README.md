@@ -52,9 +52,18 @@ Do this once, together, on both phones.
 
 After that, the way back in is the note trick: new note → type your PIN → Done.
 
-It has to be a **new** note with **no title** and the PIN on **one line** — that
-is how the app knows to even try, and it is why writing an actual grocery list
-does not pause for two seconds every time you save it.
+It has to be a **new** note, with **no title**, and the PIN as **one word on one
+line**. That is how the app knows to even try — and it is why writing an actual
+grocery list does not pause for two seconds every time you save it.
+
+**A wrong PIN is never written down.** Get it wrong and nothing is saved and
+nothing is said; you are simply back at your notes. An earlier version saved the
+attempt as an ordinary note, on the theory that this was good deniability. It
+was the opposite: mistype your PIN once and it sat in the notes list in plain
+text, one character from the real one, for anyone who picked up the phone.
+
+The cost is that a genuine one-word note needs a title or a second word to be
+kept. The editor says so while you are typing one.
 
 The long-press still works too, as a fallback.
 
