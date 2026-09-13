@@ -61,7 +61,8 @@ export class Peer {
 
     this.pc = new RTCPeerConnection({
       iceServers,
-      // Trickle everything; we want the fastest possible direct path.
+      // Gather a few candidates up front so the first offer already carries a
+      // usable path, rather than waiting on a full trickle round trip.
       iceCandidatePoolSize: 4,
     });
 
@@ -96,9 +97,11 @@ export class Peer {
     });
   }
 
-  /** The impolite side opens the channel; the other receives it. */
+  /** The impolite side opens the channel; the other receives it.
+   *  Safe to call repeatedly — the relay re-announces presence on reconnect. */
   start() {
-    if (this.role === 'b') this.bindChannel(this.pc.createDataChannel('n', { ordered: true }));
+    if (this.role !== 'b' || this.dc) return;
+    this.bindChannel(this.pc.createDataChannel('n', { ordered: true }));
   }
 
   private bindChannel(ch: any) {

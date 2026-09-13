@@ -19,21 +19,26 @@ never saved, and the chat opens instead.
   no database, no file, no cache. Closing the app empties it on both phones.
 - **No accounts.** No phone number, no email, no username, no server-side record
   that either of you exists.
-- **One shared phrase** is the entire setup. Both of you type the same phrase and
-  you are connected.
+- **One shared phrase** is the whole secret. Both of you type the same phrase and
+  you are connected. (You also both point at the same relay — see setup.)
 
 ## How the two of you get set up
 
 Do this once, together, on both phones.
 
-1. Install the app on both phones.
-2. **Long-press the word "Notes"** at the top of the screen for about a second
+1. **Put the relay somewhere.** This is the one piece that has to live on the
+   internet — see [Run the relay](#run-the-relay) below. It takes a few minutes
+   and costs nothing. You will end up with an address like
+   `wss://something.onrender.com`.
+2. Install the app on both phones.
+3. **Long-press the word "Notes"** at the top of the screen for about a second
    and a half. This is the only way in before a vault exists.
-3. Type the same phrase on both phones. Use real words with spaces —
-   `blue teapot marching uphill` is far stronger than `Pa55w0rd!`. Ten
-   characters is the floor the app enforces; five words is what you actually want.
-4. Both phones show a short code in Settings (`•••`). **Check they match.**
-   If they differ, one of you typed it differently.
+4. On both phones, enter **the same phrase** and **the same relay address**.
+   Use real words with spaces — `blue teapot marching uphill` is far stronger
+   than `Pa55w0rd!`. Ten characters is the floor the app enforces; four or five
+   words is what you actually want.
+5. Both phones show a short code in Settings (`•••`). **Check they match.**
+   If they differ, one of you typed the phrase differently.
 
 After that, the way back in is the note trick: new note → type the phrase → Done.
 
@@ -180,9 +185,16 @@ Without it you cannot ship an update that installs over the copy already on the
 phones — Android will refuse, and you would have to uninstall (losing the vault)
 first.
 
-### Run the relay yourself
+### Run the relay
 
-The app defaults to a hosted relay. If you would rather not use it:
+<a id="run-the-relay"></a>
+
+**There is no default relay, deliberately.** Hardcoding someone else's address
+would funnel every pair of users through a machine none of them control, and a
+baked-in URL that later goes dark would break the app with no explanation. So you
+run your own. It is a hundred lines and it holds nothing.
+
+Locally, to try it:
 
 ```bash
 cd server
@@ -190,9 +202,14 @@ npm install
 npm start
 ```
 
-Then put your own `wss://` address into Settings on both phones. `render.yaml`
-and `server/Dockerfile` are there if you want to deploy it somewhere; the free
-tier of anything is plenty, since it handles a few hundred bytes per connection.
+To put it online, `render.yaml` and `server/Dockerfile` are in the repo — push
+this repository to your own Render/Fly/Railway account and point it at `server/`.
+The free tier of anything is plenty: it handles a few hundred bytes per
+connection and stores nothing. Then enter that `wss://` address on both phones
+during setup.
+
+A free-tier host that sleeps when idle is fine — the app retries with backoff, so
+the first connection of the day just takes a few seconds longer.
 
 A `ws://` (unencrypted) relay on your own LAN is fine privacy-wise — the payloads
 are already sealed — but Android blocks cleartext sockets by default. Flip

@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { T } from '../theme';
-import { DEFAULT_ICE, DEFAULT_RELAY, type VaultSettings } from '../store/vaultStore';
+import { DEFAULT_ICE, RELAY_EXAMPLE, type VaultSettings } from '../store/vaultStore';
 
 type Props = {
   settings: VaultSettings;
@@ -69,7 +69,7 @@ export default function VaultSettingsScreen({ settings, roomId, onSave, onDestro
           onChangeText={setRelayUrl}
           autoCapitalize="none"
           autoCorrect={false}
-          placeholder={DEFAULT_RELAY}
+          placeholder={RELAY_EXAMPLE}
           placeholderTextColor={T.vaultInkSoft}
         />
 

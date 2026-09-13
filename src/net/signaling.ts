@@ -38,6 +38,12 @@ export class Signaling {
 
   connect() {
     this.closedByUs = false;
+
+    if (!this.url) {
+      this.ev.onClosed('No relay set — add one in Settings.');
+      return;
+    }
+
     this.ev.onStatus('Connecting…');
 
     let ws: WebSocket;

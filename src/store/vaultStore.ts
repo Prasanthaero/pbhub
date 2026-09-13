@@ -9,7 +9,18 @@ import { seal, unseal, type VaultBlob } from '../crypto/vault';
 const MARKER_KEY = '@nt/idx';
 const SETTINGS_KEY = '@nt/cache';
 
-export const DEFAULT_RELAY = 'wss://pbhub-relay.onrender.com';
+/**
+ * There is no default relay on purpose.
+ *
+ * Shipping someone else's address here would mean every pair of users funnels
+ * their rendezvous through a machine none of them control, and a hardcoded
+ * URL that later goes dark would break the app silently. Deploy `server/`
+ * somewhere (render.yaml is in the repo) and enter that address during setup.
+ */
+export const DEFAULT_RELAY = '';
+
+/** Shown as placeholder text, so the expected shape is obvious. */
+export const RELAY_EXAMPLE = 'wss://your-relay.onrender.com';
 
 export const DEFAULT_ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -25,8 +36,8 @@ export type VaultSettings = {
   blockScreenshots: boolean;
 };
 
-export const defaultSettings = (): VaultSettings => ({
-  relayUrl: DEFAULT_RELAY,
+export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
+  relayUrl,
   iceServers: DEFAULT_ICE,
   panicOnBackground: true,
   blockScreenshots: true,

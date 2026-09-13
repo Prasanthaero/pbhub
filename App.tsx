@@ -83,9 +83,15 @@ export default function App() {
   }, []);
 
   // Leaving the foreground closes everything, if asked to.
+  //
+  // Deliberately 'background' and not "anything but active": Android reports
+  // 'inactive' while a permission dialog is on screen, and locking the vault
+  // the instant someone taps Allow on the microphone prompt would make calls
+  // impossible to answer. Hiding the app from the recents switcher is handled
+  // by the screenshot block instead.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
-      if (s !== 'active' && unlocked && settings.panicOnBackground) lock();
+      if (s === 'background' && unlocked && settings.panicOnBackground) lock();
     });
     return () => sub.remove();
   }, [unlocked, settings.panicOnBackground, lock]);
@@ -189,10 +195,10 @@ export default function App() {
     return true;
   }, [enterVault]);
 
-  const setupVault = useCallback(async (passphrase: string) => {
+  const setupVault = useCallback(async (passphrase: string, relayUrl: string) => {
     const { blob, keys } = createVault(passphrase);
     await writeMarker(blob);
-    await writeSettings(keys.msgKey, defaultSettings());
+    await writeSettings(keys.msgKey, defaultSettings(relayUrl.trim()));
     setHasVault(true);
     await enterVault(keys);
   }, [enterVault]);
