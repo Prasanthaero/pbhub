@@ -288,7 +288,9 @@ export default function Chat({
 
           <View style={s.statusCenter}>
             <View style={[s.dot, { backgroundColor: dot }]} />
-            <Text style={s.status} numberOfLines={1}>{status}</Text>
+            <Text style={s.status} numberOfLines={1}>
+              {connected ? 'Connected' : relayUp ? 'They are away — messages will wait' : status}
+            </Text>
           </View>
 
           <View style={{ flexDirection: 'row', gap: 14 }}>
@@ -458,9 +460,7 @@ export default function Chat({
               onFocus={() => setTyping(true)}
               onBlur={() => setTyping(false)}
               placeholder={
-                connected ? 'Message'
-                  : relayUp ? 'They will get it when they open the app'
-                  : 'Offline'
+                connected || relayUp ? 'Message' : 'No connection yet'
               }
               placeholderTextColor={T.vaultInkSoft}
               multiline
@@ -608,8 +608,9 @@ export default function Chat({
           <View style={s.sheet}>
             <Text style={s.sheetTitle}>Send</Text>
             <Text style={s.sheetNote}>
-              These go straight between the phones — you both need to be in the app. They are never
-              saved, on either side.
+              {connected
+                ? 'Sent straight between the phones and never saved, on either side.'
+                : 'They are not in the app, so this waits for them — sealed, on the relay that cannot read it, and deleted the moment they collect it. Long videos need you both here.'}
             </Text>
             {([
               ['Photo from gallery', () => onPickPhoto(false)],

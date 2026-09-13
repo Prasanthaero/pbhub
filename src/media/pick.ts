@@ -8,6 +8,7 @@
  */
 import * as ImagePicker from 'expo-image-picker';
 import * as Legacy from 'expo-file-system/legacy';
+import { toStatusImage } from './shared';
 import { MAX_MEDIA_BYTES } from '../net/transport';
 import type { MediaKind } from '../store/messages';
 
@@ -83,7 +84,24 @@ export async function pickPhoto(fromCamera: boolean): Promise<Picked | null> {
 
   if (res.canceled || !res.assets?.length) return null;
   const a = res.assets[0];
-  return finish('photo', a.uri, a.base64);
+
+  /**
+   * Shrink it before it goes anywhere.
+   *
+   * A phone camera photo is several megabytes of detail no phone screen can
+   * show. Full size made every send slow, and made a photo too large to wait in
+   * the relay's mailbox for a partner who is not in the app — which is the
+   * whole point of being able to send one at all. 1080px looks the same in a
+   * chat bubble and is a fraction of the size.
+   */
+  const small = await toStatusImage(a.uri);
+  await discard(a.uri);
+  return {
+    kind: 'photo',
+    b64: small.uri.split(',')[1],
+    mime: small.mime,
+    bytes: small.bytes,
+  };
 }
 
 export async function pickVideo(fromCamera: boolean): Promise<Picked | null> {

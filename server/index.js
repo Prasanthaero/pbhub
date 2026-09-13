@@ -20,7 +20,15 @@ const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 8080;
 const MAX_ROOM = 2;
-const MAX_FRAME = 512 * 1024;
+/**
+ * Big enough for one sealed photo or short clip.
+ *
+ * Media used to require both phones present, so nothing large ever passed
+ * through here. Now that a photo can wait for someone, a single frame has to be
+ * able to carry one — still ciphertext, still dropped the moment it is
+ * collected, still never written to disk.
+ */
+const MAX_FRAME = 12 * 1024 * 1024;
 const IDLE_MS = 10 * 60 * 1000;
 
 /** Caps per mailbox, so a room cannot be used as free storage. */

@@ -97,8 +97,42 @@ try {
   assert.equal(b2.log.mail.length, 0);
   ok('a collected message is gone from the relay, not re-delivered');
 
-  console.log('\nthe mailbox is not free storage');
+  console.log('\na photo sent to someone who is not there');
+  // The point of this: media used to need both phones present at once, so a
+  // picture sent to a partner who was not in the app could not be sent at all.
   b2.s.close();
+  await wait(400);
+
+  // Stands in for a shrunk camera photo — a few hundred KB that are not text.
+  const photo = Buffer.alloc(300 * 1024);
+  for (let i = 0; i < photo.length; i++) photo[i] = (i * 31) & 0xff;
+  const photoB64 = photo.toString('base64');
+
+  const photoWire = seal(keys.msgKey, JSON.stringify({
+    k: 'media-whole', id: 'p1', kind: 'photo', mime: 'image/jpeg',
+    bytes: photo.length, b64: photoB64, at: Date.now(),
+  }));
+  a.s.mail('p1', photoWire);
+  await wait(1200);
+
+  assert.ok(a.log.held.includes('p1'), 'the relay refused to hold the photo');
+  ok('the relay holds a photo for an absent partner, as it does a message');
+
+  assert.ok(!photoWire.includes(photoB64.slice(0, 40)), 'the photo went over in the clear');
+  assert.match(photoWire, /^[0-9a-f]+$/);
+  ok('...as ciphertext, not a picture');
+
+  const b3 = client('B3', keys);
+  await wait(1500);
+  const arrived = b3.log.mail.find((m) => m.id === 'p1');
+  assert.ok(arrived, 'the photo never arrived');
+  const shown = JSON.parse(unseal(keys.msgKey, arrived.wire));
+  assert.equal(shown.k, 'media-whole');
+  assert.equal(shown.b64, photoB64);
+  ok('and it arrives byte for byte when they open the app');
+
+  console.log('\nthe mailbox is not free storage');
+  b3.s.close();
   await wait(400);
   // 600 is above the 500-item cap.
   const filler = seal(keys.msgKey, JSON.stringify({ k: 'msg', id: 'x', body: 'x', at: 1 }));

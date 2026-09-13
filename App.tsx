@@ -24,7 +24,7 @@ import {
 } from './src/store/statusMedia';
 import { Signaling, type Role } from './src/net/signaling';
 import { Peer, type CallKind } from './src/net/peer';
-import type { Envelope } from './src/net/transport';
+import { MAX_OFFLINE_MEDIA_BYTES, type Envelope } from './src/net/transport';
 import { prepareNotifications, showDot, clearDot } from './src/net/notify';
 import { pickPhoto, pickVideo, readRecording, TooLarge } from './src/media/pick';
 import {
@@ -232,6 +232,26 @@ export default function App() {
       case 'read': {
         const seen = new Set(e.ids);
         setMessages((m) => m.map((x) => (seen.has(x.id) ? { ...x, delivery: 'read' } : x)));
+        return;
+      }
+      case 'media-whole': {
+        if (seenRef.current.has(e.id)) return;
+        seenRef.current.add(e.id);
+        setMessages((m) => [
+          ...m,
+          {
+            id: e.id, kind: 'in', body: '', at: e.at || at,
+            media: {
+              kind: e.kind,
+              uri: `data:${e.mime};base64,${e.b64}`,
+              mime: e.mime,
+              bytes: e.bytes,
+              duration: e.duration,
+            },
+          },
+        ]);
+        if (!peerRef.current?.send({ k: 'ack', id: e.id })) sigRef.current?.ack(e.id);
+        if (!foreground.current && settingsRef.current.quietNotifications) showDot();
         return;
       }
       case 'status-list':
@@ -501,7 +521,19 @@ export default function App() {
    * queueing pictures on someone else's server is exactly what this app exists
    * to avoid — so if the partner is not here, we say so rather than storing it.
    */
-  /** Push already-read bytes across, showing progress as it goes. */
+  /**
+   * Send a photo, clip or voice note.
+   *
+   * Partner here: chunked down the data channel, with progress, as before.
+   * Partner away: sealed whole and left in the relay's mailbox, exactly like a
+   * text message, so it is waiting when they open the app. The relay cannot
+   * read it either way — it is the same ciphertext, and it is dropped the
+   * moment it is collected.
+   *
+   * The offline road has a smaller size limit, because the file has to sit in
+   * this phone's outbox and the relay's memory until then rather than streaming
+   * past in seconds.
+   */
   const shipMediaBytes = useCallback(async (
     kind: MediaKind,
     b64: string,
@@ -510,45 +542,56 @@ export default function App() {
     duration?: number,
   ) => {
     const peer = peerRef.current;
-    if (!peer?.isOpen) return false;
-
+    const sig = sigRef.current;
     const id = newId();
     const at = Date.now();
-    setMessages((m) => [
-      ...m,
-      {
-        id, kind: 'out', body: '', at, delivery: 'sending', progress: 0,
-        media: { kind, uri: `data:${mime};base64,${b64}`, mime, bytes, duration },
-      },
-    ]);
-    setSending({ id, progress: 0 });
+    const uri = `data:${mime};base64,${b64}`;
 
-    const ok = await peer.sendMedia(id, kind, b64, mime, bytes, duration, (p) => {
-      setSending({ id, progress: p });
-      setMessages((m) => m.map((x) => (x.id === id ? { ...x, progress: p } : x)));
-    });
+    const showIt = (delivery: Msg['delivery'], progress?: number) =>
+      setMessages((m) => {
+        const existing = m.some((x) => x.id === id);
+        const row: Msg = {
+          id, kind: 'out', body: '', at, delivery, progress,
+          media: { kind, uri, mime, bytes, duration },
+        };
+        return existing ? m.map((x) => (x.id === id ? row : x)) : [...m, row];
+      });
 
-    setSending(null);
-    setMessages((m) =>
-      m.map((x) =>
-        x.id === id ? { ...x, progress: undefined, delivery: ok ? 'delivered' : 'failed' } : x,
-      ),
-    );
-    return ok;
-  }, []);
+    // --- they are here: stream it ---
+    if (peer?.isOpen) {
+      showIt('sending', 0);
+      setSending({ id, progress: 0 });
+      const ok = await peer.sendMedia(id, kind, b64, mime, bytes, duration, (p) => {
+        setSending({ id, progress: p });
+        setMessages((m) => m.map((x) => (x.id === id ? { ...x, progress: p } : x)));
+      });
+      setSending(null);
+      showIt(ok ? 'delivered' : 'failed');
+      return ok;
+    }
+
+    // --- they are away: leave it for them ---
+    if (bytes > MAX_OFFLINE_MEDIA_BYTES) {
+      Alert.alert(
+        'Too big to leave waiting',
+        'This is large enough that it needs you both in the app at once. A shorter clip will wait for them.',
+      );
+      return false;
+    }
+    if (!peer) return false;
+
+    showIt('sending');
+    const wire = peer.wrap({ k: 'media-whole', id, kind, mime, bytes, duration, b64, at });
+    outboxRef.current = [...outboxRef.current, { id, wire, at }];
+    persistOutbox();
+    if (!sig?.mail(id, wire)) markDelivered(id, 'sending');
+    return true;
+  }, [markDelivered, persistOutbox]);
 
   const shipMedia = useCallback(async (
     kind: MediaKind,
     get: () => Promise<{ b64: string; mime: string; bytes: number; duration?: number } | null>,
   ) => {
-    if (!peerRef.current?.isOpen) {
-      Alert.alert(
-        'Not connected',
-        'Photos, video and voice notes go straight between the phones, so you both need to be in the app. Text can wait for them; pictures cannot.',
-      );
-      return;
-    }
-
     let picked;
     try {
       leavingOnPurpose.current = true;

@@ -28,6 +28,16 @@ export const BUFFER_LOW = 128 * 1024;
 /** Refuse anything that would take absurdly long over a phone connection. */
 export const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
 
+/**
+ * The most that can be left waiting for an absent partner.
+ *
+ * Smaller than the live limit on purpose: this has to sit encrypted in the
+ * sender's outbox and in the relay's memory until it is collected, rather than
+ * streaming past in a few seconds. Photos are shrunk well under this; a long
+ * video is not, and is told to wait for both phones.
+ */
+export const MAX_OFFLINE_MEDIA_BYTES = 4 * 1024 * 1024;
+
 export type Envelope =
   | { k: 'msg'; id: string; body: string; at: number }
   | { k: 'ack'; id: string }
@@ -62,7 +72,25 @@ export type Envelope =
     }
   | { k: 'media-chunk'; id: string; seq: number; b64: string }
   | { k: 'media-end'; id: string }
-  | { k: 'media-abort'; id: string; reason: string };
+  | { k: 'media-abort'; id: string; reason: string }
+  /**
+   * A whole file in one envelope, for when the partner is not here.
+   *
+   * The chunked path above exists because a data channel will not carry a large
+   * message. The relay's mailbox will, so mail takes the simple road: seal it
+   * once, hand it over, and let it wait. Capped, because it has to sit in the
+   * sender's outbox and in the relay's memory until it is collected.
+   */
+  | {
+      k: 'media-whole';
+      id: string;
+      kind: MediaKind;
+      mime: string;
+      bytes: number;
+      duration?: number;
+      b64: string;
+      at: number;
+    };
 
 /** Reassembles a media transfer as its chunks arrive. */
 export class MediaAssembler {
