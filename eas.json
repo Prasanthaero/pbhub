@@ -4,6 +4,17 @@
     "appVersionSource": "local"
   },
   "build": {
+    "development": {
+      "//": "Install this on the iPhone once. It connects to Metro on your PC, so from then on you edit code in Windows and the phone reloads — the same loop as Android. Needs the Apple Developer account, because any install on a real iPhone does.",
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "ios-device": {
       "//": "For putting it on your own two iPhones. 'internal' means the build is signed for specific registered devices rather than the App Store, which is what you want for an app that is never going to be listed.",
       "distribution": "internal",
