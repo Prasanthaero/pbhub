@@ -48,6 +48,15 @@ type Props = {
   onSettings: () => void;
 };
 
+/**
+ * The gap left under the message box in Expo Go.
+ *
+ * Enough that it is clearly sitting above the keyboard and the navigation
+ * buttons rather than touching them — flush against the keys reads as a box
+ * that is about to be swallowed by them.
+ */
+const BREATHING_ROOM = 24;
+
 const clock = (ts: number) =>
   new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
@@ -181,7 +190,7 @@ export default function Chat({
     Dimensions.get('screen').height - win.height - (StatusBar.currentHeight ?? 0),
   );
   const navBar = Math.max(safeBottom, systemBars, Platform.OS === 'android' ? 28 : 0);
-  const bottomPad = inExpoGo ? Math.max(inset, navBar) + 10 : inset;
+  const bottomPad = inExpoGo ? Math.max(inset, navBar) + BREATHING_ROOM : inset;
 
   const listRef = useRef<FlatList<Msg>>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
