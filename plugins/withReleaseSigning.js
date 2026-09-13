@@ -7,18 +7,28 @@
  * back as debug-signed without saying anything, and a debug-signed APK cannot be
  * upgraded in place by a properly signed one later.
  *
- * Credentials come from android/keystore.properties, which is gitignored. If
- * that file is absent (a fresh clone, CI without secrets) the build falls back
- * to debug signing so it still succeeds.
+ * Credentials come from signing/keystore.properties in the project root, which
+ * is gitignored. They deliberately live OUTSIDE android/: that folder is
+ * generated, so a 'prebuild --clean' deletes everything in it. Keeping the
+ * keystore there meant it vanished without a word and release builds quietly
+ * fell back to the debug key — which is a key everybody has, and which cannot
+ * later be upgraded over.
+ *
+ * If the file is absent (a fresh clone, CI without secrets) the build still
+ * falls back to debug signing rather than failing, but it says so, because a
+ * silent fallback is exactly how this went wrong the first time.
  */
 const { withAppBuildGradle } = require('@expo/config-plugins');
 
 const LOADER = `
 // --- pbhub release signing (injected by plugins/withReleaseSigning.js) ---
 def pbhubKeystoreProps = new Properties()
-def pbhubKeystoreFile = rootProject.file('keystore.properties')
+// ../signing: outside android/, so prebuild --clean cannot delete it.
+def pbhubKeystoreFile = rootProject.file('../signing/keystore.properties')
 if (pbhubKeystoreFile.exists()) {
     pbhubKeystoreProps.load(new FileInputStream(pbhubKeystoreFile))
+} else {
+    logger.warn('[pbhub] signing/keystore.properties not found - release builds will use the DEBUG key')
 }
 `;
 

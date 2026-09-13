@@ -45,3 +45,6 @@ yarn-error.*
 android/keystore.properties
 android/*.keystore
 *.jks
+
+# Signing material lives outside android/ so prebuild --clean cannot delete it.
+/signing/
