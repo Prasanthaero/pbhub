@@ -24,19 +24,23 @@ export default function NoteEditor({ note, isNew, tryUnlock, onSave, onDelete, o
   const [checking, setChecking] = useState(false);
 
   /**
-   * Whether this note is even shaped like a passphrase attempt.
+   * Whether this note is even shaped like a PIN attempt.
    *
-   * Key derivation is deliberately slow — two or three seconds on a phone — so
+   * Key derivation is deliberately slow — about two seconds on a phone — so
    * running it on every save would make the cover story itself feel broken:
-   * jotting down a grocery list should not pause. A phrase is typed as the only
+   * jotting down a grocery list should not pause. A PIN is typed as the only
    * line of a fresh, untitled note, so anything with a title, a second line, or
    * an existing id is saved immediately without touching the KDF.
+   *
+   * The lower bound is 4 to match the shortest PIN setup will accept. It must
+   * never drift above that: a PIN the app allows but this refuses to try would
+   * lock someone out of their own vault, with no error to explain why.
    */
   const looksLikeAttempt =
     isNew &&
     !title.trim() &&
     !body.includes('\n') &&
-    body.trim().length >= 10 &&
+    body.trim().length >= 4 &&
     body.trim().length <= 128;
 
   const done = async () => {

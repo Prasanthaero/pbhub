@@ -9,12 +9,16 @@ import { DEFAULT_ICE, RELAY_EXAMPLE, type VaultSettings } from '../store/vaultSt
 type Props = {
   settings: VaultSettings;
   roomId: string;
+  pairingPhrase: string;
   onSave: (s: VaultSettings) => void;
   onDestroy: () => void;
   onBack: () => void;
 };
 
-export default function VaultSettingsScreen({ settings, roomId, onSave, onDestroy, onBack }: Props) {
+export default function VaultSettingsScreen({
+  settings, roomId, pairingPhrase, onSave, onDestroy, onBack,
+}: Props) {
+  const [showPairing, setShowPairing] = useState(false);
   const [relayUrl, setRelayUrl] = useState(settings.relayUrl);
   const [ice, setIce] = useState(JSON.stringify(settings.iceServers, null, 2));
   const [panic, setPanic] = useState(settings.panicOnBackground);
@@ -108,6 +112,24 @@ export default function VaultSettingsScreen({ settings, roomId, onSave, onDestro
           <Switch value={block} onValueChange={setBlock} />
         </View>
 
+        <Text style={s.section}>Pairing phrase</Text>
+        <Text style={s.help}>
+          The words that connect the two phones. You need these once, to set up the second phone.
+          Anyone who reads them can join this conversation, so do not leave them on screen.
+        </Text>
+        {showPairing ? (
+          <>
+            <Text style={s.pairing}>{pairingPhrase}</Text>
+            <TouchableOpacity onPress={() => setShowPairing(false)}>
+              <Text style={s.link}>Hide</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <TouchableOpacity style={s.reveal} onPress={() => setShowPairing(true)}>
+            <Text style={s.revealText}>Show the words</Text>
+          </TouchableOpacity>
+        )}
+
         <Text style={s.section}>This pairing</Text>
         <Text style={s.help}>
           Both phones must show the same short code below. If they differ, one of you typed the
@@ -145,6 +167,16 @@ const s = StyleSheet.create({
   },
   rowTitle: { color: T.vaultInk, fontSize: 15 },
   rowSub: { color: T.vaultInkSoft, fontSize: 12, marginTop: 3, lineHeight: 17 },
+  pairing: {
+    color: T.accent, fontSize: 18, fontWeight: '600', lineHeight: 26,
+    backgroundColor: T.vaultCard, borderRadius: 10, padding: 14,
+    borderWidth: 1, borderColor: T.accent,
+  },
+  reveal: {
+    borderWidth: 1, borderColor: T.vaultLine, borderRadius: 10,
+    paddingVertical: 12, alignItems: 'center',
+  },
+  revealText: { color: T.vaultInk, fontSize: 14, fontWeight: '600' },
   fingerprint: {
     color: T.accent, fontSize: 24, fontWeight: '700', letterSpacing: 3,
     fontFamily: 'monospace', marginTop: 4,

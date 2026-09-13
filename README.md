@@ -6,7 +6,7 @@ On the home screen it is called **Notes**, it has a notepad icon, and if you
 open it you get a working notes app with groceries and a wifi password in it.
 There is no second tab, no login screen, and nothing that says "chat".
 
-Open a new note, type your phrase as the only line in it, and press **Done**.
+Open a new note, type your PIN as the only line in it, and press **Done**.
 The note is never saved, and the chat opens instead.
 
 ---
@@ -36,30 +36,37 @@ Do this once, together, on both phones.
 2. Install the app on both phones.
 3. **Long-press the word "Notes"** at the top of the screen for about a second
    and a half. This is the only way in before a vault exists.
-4. On both phones, enter **the same phrase** and **the same relay address**.
-   Use real words with spaces — `blue teapot marching uphill` is far stronger
-   than `Pa55w0rd!`. Ten characters is the floor the app enforces; four or five
-   words is what you actually want.
-5. Both phones show a short code in Settings (`•••`). **Check they match.**
-   If they differ, one of you typed the phrase differently.
+4. On the first phone, tap **"Make one up for us"**. You get eight words:
 
-After that, the way back in is the note trick: new note → type the phrase → Done.
+   > chair chin ash bread block book mask jelly
 
-It has to be a **new** note with **no title** and the phrase on **one line** —
-that is how the app knows to even try, and it is why writing an actual grocery
-list does not pause for two seconds every time you save it.
+   Write them down. Type the *same words* into the second phone. This happens
+   **once** and is not what you type to get in — you can forget it afterwards.
+   (If you lose them, they are in Settings → Pairing phrase on a phone that is
+   already set up.)
+5. Choose a **PIN** on each phone. This is what you type into a note to open the
+   chat. It stays on that phone, so the two phones do not have to match, and it
+   can be short — `110490` is fine.
+6. Enter the same relay address on both.
+7. Both phones show a short code in Settings (`•••`). **Check they match.**
+
+After that, the way back in is the note trick: new note → type your PIN → Done.
+
+It has to be a **new** note with **no title** and the PIN on **one line** — that
+is how the app knows to even try, and it is why writing an actual grocery list
+does not pause for two seconds every time you save it.
 
 The long-press still works too, as a fallback.
 
-> **Nobody can recover this phrase.** Not you, not us, not the relay. There is no
-> reset. That is the point, and it is also the risk — if you both forget it, the
-> vault is gone and you make a new one.
+> **Nobody can recover any of this.** Not you, not us, not the relay. There is
+> no reset. If you both forget your PINs and lose the pairing words, the vault is
+> gone and you set up a new one.
 
 ## Using it
 
 | | |
 |---|---|
-| Open the chat | New note → type the phrase as the only line → **Done** |
+| Open the chat | New note → type your PIN as the only line → **Done** |
 | Close it fast | **Close** in the top-left, or just switch apps |
 | Voice call | **Call** |
 | Video call | **Video** |

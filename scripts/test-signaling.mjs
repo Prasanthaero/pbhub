@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createVault, seal, unseal } from '../src/crypto/vault.ts';
+import { generatePairingSecret } from '../src/crypto/wordlist.ts';
 import { Signaling } from '../src/net/signaling.ts';
 
 const PORT = 8123;
@@ -41,7 +42,7 @@ function client(tag, keys, onSignal = () => {}) {
 }
 
 try {
-  const { keys } = createVault('correct horse battery staple river');
+  const { keys } = createVault('110490', generatePairingSecret());
 
   console.log('handshake');
   const a = client('A', keys);

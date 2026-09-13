@@ -68,3 +68,41 @@ export function generatePhrase(words = WORDS_IN_PHRASE): string {
 
 /** Bits of entropy in a generated phrase, for showing the user. */
 export const phraseBits = (words = WORDS_IN_PHRASE) => words * 8;
+
+// ---------------------------------------------------------------------------
+// Pairing secret <-> words
+//
+// The pairing secret is raw random bytes, and it has to be carried from one
+// phone to the other by a human reading it out. Words survive that trip;
+// hex does not. Because the list is exactly 256 long, one byte is one word and
+// the mapping is lossless in both directions.
+// ---------------------------------------------------------------------------
+
+/** Bytes in a pairing secret. 8 bytes = 64 bits = 8 words to type once. */
+export const PAIRING_BYTES = 8;
+
+const INDEX: Record<string, number> = {};
+WORDS.forEach((word, i) => { INDEX[word] = i; });
+
+export function bytesToWords(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => WORDS[b]).join(' ');
+}
+
+/** Returns null if any word is not in the list, so a typo cannot silently
+ *  produce a different secret and a mystifying "waiting for partner" forever. */
+export function wordsToBytes(phrase: string): Uint8Array | null {
+  const words = phrase.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length !== PAIRING_BYTES) return null;
+  const out = new Uint8Array(PAIRING_BYTES);
+  for (let i = 0; i < words.length; i++) {
+    const idx = INDEX[words[i]];
+    if (idx === undefined) return null;
+    out[i] = idx;
+  }
+  return out;
+}
+
+/** A fresh pairing secret, straight from the system CSPRNG. */
+export function generatePairingSecret(): Uint8Array {
+  return randomBytes(PAIRING_BYTES);
+}

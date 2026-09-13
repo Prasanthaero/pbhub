@@ -12,6 +12,7 @@ import {
 } from './src/store/vaultStore';
 import { loadNotes, saveNotes, newNote, type Note } from './src/store/notes';
 import { mkMsg, type Msg } from './src/store/messages';
+import { bytesToWords } from './src/crypto/wordlist';
 import { Signaling, type Role } from './src/net/signaling';
 import { Peer, type CallKind } from './src/net/peer';
 
@@ -79,6 +80,7 @@ export default function App() {
     sigRef.current?.close();
     sigRef.current = null;
     wipe(keysRef.current?.msgKey);
+    wipe(keysRef.current?.pairing);
     keysRef.current = null;
     setMessages([]);
     setLocalStream(null);
@@ -194,7 +196,8 @@ export default function App() {
   }, [connect]);
 
   // ---- entrances ---------------------------------------------------------
-  /** Called from the note editor with whatever the user typed. */
+  /** Called from the note editor with whatever the user typed — a PIN, or an
+   *  ordinary note that is about to be saved as one. */
   const tryUnlock = useCallback(async (candidate: string): Promise<boolean> => {
     const marker = await readMarker();
     if (!marker) return false;
@@ -204,13 +207,16 @@ export default function App() {
     return true;
   }, [enterVault]);
 
-  const setupVault = useCallback(async (passphrase: string, relayUrl: string) => {
-    const { blob, keys } = createVault(passphrase);
-    await writeMarker(blob);
-    await writeSettings(keys.msgKey, defaultSettings(relayUrl.trim()));
-    setHasVault(true);
-    await enterVault(keys);
-  }, [enterVault]);
+  const setupVault = useCallback(
+    async (pin: string, secret: Uint8Array, relayUrl: string) => {
+      const { blob, keys } = createVault(pin, secret);
+      await writeMarker(blob);
+      await writeSettings(keys.msgKey, defaultSettings(relayUrl.trim()));
+      setHasVault(true);
+      await enterVault(keys);
+    },
+    [enterVault],
+  );
 
   // ---- notes -------------------------------------------------------------
   const persist = async (next: Note[]) => {
@@ -306,6 +312,7 @@ export default function App() {
         <VaultSettingsScreen
           settings={settings}
           roomId={keysRef.current.roomId}
+          pairingPhrase={bytesToWords(keysRef.current.pairing)}
           onSave={async (next) => {
             const keys = keysRef.current;
             setSettings(next);

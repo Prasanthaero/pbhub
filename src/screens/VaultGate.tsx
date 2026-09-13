@@ -6,58 +6,105 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { T } from '../theme';
 import { RELAY_EXAMPLE } from '../store/vaultStore';
-import { generatePhrase, phraseBits } from '../crypto/wordlist';
+import {
+  generatePairingSecret, bytesToWords, wordsToBytes, PAIRING_BYTES,
+} from '../crypto/wordlist';
 
 type Props = {
   mode: 'setup' | 'unlock';
-  onSetup: (passphrase: string, relayUrl: string) => Promise<void>;
-  onUnlock: (passphrase: string) => Promise<boolean>;
+  onSetup: (pin: string, secret: Uint8Array, relayUrl: string) => Promise<void>;
+  onUnlock: (pin: string) => Promise<boolean>;
   onCancel: () => void;
 };
 
+/** Prefilled so the common case is one tap. Editable — it is only a default. */
+const DEFAULT_PIN = '110490';
+
 export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) {
-  const [p1, setP1] = useState('');
-  const [p2, setP2] = useState('');
+  const [pin, setPin] = useState(mode === 'setup' ? DEFAULT_PIN : '');
+  const [pin2, setPin2] = useState(mode === 'setup' ? DEFAULT_PIN : '');
+  const [pairing, setPairing] = useState('');
   const [relay, setRelay] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  // Shown in the clear while setting up, because both people have to copy it
-  // onto the other phone. It is never displayed again after this screen.
-  const [suggested, setSuggested] = useState('');
+  const [generated, setGenerated] = useState(false);
 
-  const suggest = () => {
-    const p = generatePhrase();
-    setSuggested(p);
-    setP1(p);
-    setP2(p);
+  const makePairing = () => {
+    setPairing(bytesToWords(generatePairingSecret()));
+    setGenerated(true);
     setErr('');
   };
 
   const go = async () => {
     setErr('');
-    if (mode === 'setup') {
-      if (p1.trim().length < 10) {
-        return setErr('Use at least 10 characters. A few ordinary words beats a short password.');
-      }
-      if (p1 !== p2) return setErr('The two entries do not match.');
-      if (!/^wss?:\/\/.+/i.test(relay.trim())) {
-        return setErr('Enter the address of your relay, starting with wss://');
-      }
-    }
-    setBusy(true);
-    await new Promise((r) => setTimeout(r, 30));
-    try {
-      if (mode === 'setup') await onSetup(p1, relay);
-      else if (!(await onUnlock(p1))) {
+
+    if (mode === 'unlock') {
+      setBusy(true);
+      await new Promise((r) => setTimeout(r, 30));
+      if (!(await onUnlock(pin))) {
         setErr('No.');
         setBusy(false);
       }
+      return;
+    }
+
+    if (pin.trim().length < 4) return setErr('The PIN needs at least 4 characters.');
+    if (pin !== pin2) return setErr('The two PINs do not match.');
+
+    const secret = wordsToBytes(pairing);
+    if (!secret) {
+      return setErr(
+        pairing.trim()
+          ? `That is not a valid pairing phrase. It is ${PAIRING_BYTES} words from this app — check for a typo.`
+          : 'Make a pairing phrase, or type in the one from the other phone.',
+      );
+    }
+    if (!/^wss?:\/\/.+/i.test(relay.trim())) {
+      return setErr('Enter the address of your relay, starting with wss://');
+    }
+
+    setBusy(true);
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await onSetup(pin, secret, relay);
     } catch {
       setErr('Something went wrong.');
       setBusy(false);
     }
   };
 
+  // ---- unlock: just the PIN ------------------------------------------------
+  if (mode === 'unlock') {
+    return (
+      <SafeAreaView style={s.wrap}>
+        <StatusBar barStyle="light-content" backgroundColor={T.vaultBg} />
+        <TouchableOpacity onPress={onCancel} hitSlop={12} style={{ padding: 16 }}>
+          <Text style={{ color: T.vaultInkSoft, fontSize: 16 }}>Back</Text>
+        </TouchableOpacity>
+        <View style={s.body}>
+          <Text style={s.h}>PIN</Text>
+          <TextInput
+            style={s.input}
+            value={pin}
+            onChangeText={setPin}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="number-pad"
+            placeholder="••••••"
+            placeholderTextColor={T.vaultInkSoft}
+            autoFocus
+          />
+          {!!err && <Text style={s.err}>{err}</Text>}
+          <TouchableOpacity style={[s.btn, busy && { opacity: 0.6 }]} onPress={go} disabled={busy}>
+            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.btnText}>Open</Text>}
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ---- setup ---------------------------------------------------------------
   return (
     <SafeAreaView style={s.wrap}>
       <StatusBar barStyle="light-content" backgroundColor={T.vaultBg} />
@@ -70,91 +117,95 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-          <Text style={s.h}>{mode === 'setup' ? 'Create the phrase' : 'Phrase'}</Text>
+          <Text style={s.h}>Set up</Text>
 
-          {mode === 'setup' && (
-            <Text style={s.sub}>
-              You and one other person type the exact same phrase. That is the whole setup — no
-              accounts, no numbers, no names. Nobody can recover it for you, including this app.
+          <Text style={s.step}>1 · Pairing phrase</Text>
+          <Text style={s.sub}>
+            This is what connects the two phones. Make one here, then type the same words into the
+            other phone. You only ever do this once — it is not the thing you type to get in.
+          </Text>
+
+          <TouchableOpacity style={s.suggestBtn} onPress={makePairing}>
+            <Text style={s.suggestText}>
+              {generated ? 'Give me another' : 'Make one up for us'}
             </Text>
-          )}
+          </TouchableOpacity>
 
-          {mode === 'setup' && (
-            <>
-              <TouchableOpacity style={s.suggestBtn} onPress={suggest}>
-                <Text style={s.suggestText}>
-                  {suggested ? 'Give me another' : 'Make one up for us'}
-                </Text>
-              </TouchableOpacity>
-              {!!suggested && (
-                <View style={s.suggestBox}>
-                  <Text style={s.suggestPhrase}>{suggested}</Text>
-                  <Text style={s.suggestNote}>
-                    Write this down somewhere safe and type it into the other phone.
-                    {' '}{phraseBits()} bits of randomness — nothing about you, nothing guessable.
-                  </Text>
-                </View>
-              )}
-            </>
+          {generated && !!pairing && (
+            <View style={s.suggestBox}>
+              <Text style={s.suggestPhrase}>{pairing}</Text>
+              <Text style={s.suggestNote}>
+                Write this down and type it into the other phone. Then you can forget it.
+              </Text>
+            </View>
           )}
 
           <TextInput
+            style={[s.input, generated && s.inputMuted]}
+            value={pairing}
+            onChangeText={(t) => { setPairing(t); setGenerated(false); }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            multiline
+            placeholder={`or type the ${PAIRING_BYTES} words from the other phone`}
+            placeholderTextColor={T.vaultInkSoft}
+          />
+
+          <Text style={s.step}>2 · Your PIN</Text>
+          <Text style={s.sub}>
+            This is what you type into a new note to open the chat. It stays on this phone and
+            never goes anywhere, so it can be short. A longer one is harder for anyone holding
+            your phone to guess.
+          </Text>
+
+          <TextInput
             style={s.input}
-            value={p1}
-            onChangeText={(t) => { setP1(t); setSuggested(''); }}
+            value={pin}
+            onChangeText={setPin}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
-            placeholder="passphrase"
+            placeholder="PIN"
             placeholderTextColor={T.vaultInkSoft}
-            autoFocus
+          />
+          <TextInput
+            style={s.input}
+            value={pin2}
+            onChangeText={setPin2}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="type it again"
+            placeholderTextColor={T.vaultInkSoft}
           />
 
-          {mode === 'setup' && (
-            <>
-              <TextInput
-                style={s.input}
-                value={p2}
-                onChangeText={(t) => { setP2(t); setSuggested(''); }}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="type it again"
-                placeholderTextColor={T.vaultInkSoft}
-              />
-
-              <Text style={s.label}>Relay address</Text>
-              <Text style={s.sub}>
-                Two phones that have never met need something to introduce them. The relay does
-                only that: it sees a hash and ciphertext, keeps nothing, and drops out once you are
-                connected. Run your own — <Text style={s.mono}>server/</Text> in the project — and
-                put its address here. Both of you must use the same one.
-              </Text>
-              <TextInput
-                style={s.input}
-                value={relay}
-                onChangeText={setRelay}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-                placeholder={RELAY_EXAMPLE}
-                placeholderTextColor={T.vaultInkSoft}
-              />
-            </>
-          )}
+          <Text style={s.step}>3 · Relay address</Text>
+          <Text style={s.sub}>
+            Two phones that have never met need something to introduce them. The relay does only
+            that: it sees a hash and ciphertext, keeps nothing, and drops out once you are
+            connected. Run your own — <Text style={s.mono}>server/</Text> in the project. Both of
+            you must use the same one.
+          </Text>
+          <TextInput
+            style={s.input}
+            value={relay}
+            onChangeText={setRelay}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            placeholder={RELAY_EXAMPLE}
+            placeholderTextColor={T.vaultInkSoft}
+          />
 
           {!!err && <Text style={s.err}>{err}</Text>}
 
           <TouchableOpacity style={[s.btn, busy && { opacity: 0.6 }]} onPress={go} disabled={busy}>
-            {busy ? <ActivityIndicator color="#fff" />
-              : <Text style={s.btnText}>{mode === 'setup' ? 'Create' : 'Open'}</Text>}
+            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.btnText}>Create</Text>}
           </TouchableOpacity>
 
-          {mode === 'setup' && (
-            <Text style={s.note}>
-              Once this exists, you get back in by opening a new note and typing the phrase into it.
-            </Text>
-          )}
+          <Text style={s.note}>
+            After this, you get in by opening a new note and typing your PIN into it.
+          </Text>
           <View style={{ height: 40 }} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -165,17 +216,18 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: T.vaultBg },
   body: { paddingHorizontal: 24, paddingTop: 16 },
-  h: { fontSize: 28, fontWeight: '700', color: T.vaultInk, marginBottom: 10 },
-  label: { fontSize: 15, fontWeight: '600', color: T.vaultInk, marginTop: 22 },
-  sub: { fontSize: 13.5, color: T.vaultInkSoft, marginTop: 8, marginBottom: 18, lineHeight: 20 },
+  h: { fontSize: 28, fontWeight: '700', color: T.vaultInk, marginBottom: 4 },
+  step: { fontSize: 16, fontWeight: '700', color: T.accent, marginTop: 26 },
+  sub: { fontSize: 13.5, color: T.vaultInkSoft, marginTop: 8, marginBottom: 14, lineHeight: 20 },
   mono: { fontFamily: 'monospace', color: T.vaultInk },
   input: {
     backgroundColor: T.vaultCard, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
     color: T.vaultInk, fontSize: 16, marginBottom: 12, borderWidth: 1, borderColor: T.vaultLine,
   },
+  inputMuted: { opacity: 0.45 },
   err: { color: T.danger, marginBottom: 12, fontSize: 14, lineHeight: 20 },
   btn: {
-    backgroundColor: T.mine, borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 8,
+    backgroundColor: T.mine, borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 10,
   },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   note: { color: T.vaultInkSoft, fontSize: 13, marginTop: 20, lineHeight: 19 },
@@ -185,7 +237,7 @@ const s = StyleSheet.create({
   },
   suggestText: { color: T.accent, fontSize: 15, fontWeight: '600' },
   suggestBox: {
-    backgroundColor: T.vaultCard, borderRadius: 12, padding: 16, marginBottom: 16,
+    backgroundColor: T.vaultCard, borderRadius: 12, padding: 16, marginBottom: 14,
     borderWidth: 1, borderColor: T.accent,
   },
   suggestPhrase: {
