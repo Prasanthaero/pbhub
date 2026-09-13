@@ -33,6 +33,7 @@ export default function App() {
   // ---- cover story -------------------------------------------------------
   const [notes, setNotes] = useState<Note[]>([]);
   const [active, setActive] = useState<Note | null>(null);
+  const [activeIsNew, setActiveIsNew] = useState(false);
   const [screen, setScreen] = useState<Screen>('list');
   const [hasVault, setHasVault] = useState(false);
 
@@ -350,6 +351,7 @@ export default function App() {
       return (
         <NoteEditor
           note={active}
+          isNew={activeIsNew}
           tryUnlock={tryUnlock}
           onSave={onSaveNote}
           onDelete={onDeleteNote}
@@ -366,10 +368,12 @@ export default function App() {
         notes={notes}
         onOpen={(n) => {
           setActive(n);
+          setActiveIsNew(false);
           setScreen('editor');
         }}
         onNew={() => {
           setActive(newNote());
+          setActiveIsNew(true);
           setScreen('editor');
         }}
         onSecretGesture={() => setScreen('gate')}

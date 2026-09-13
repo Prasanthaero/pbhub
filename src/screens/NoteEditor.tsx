@@ -9,6 +9,8 @@ import type { Note } from '../store/notes';
 
 type Props = {
   note: Note;
+  /** True for a note that has never been saved. */
+  isNew: boolean;
   /** Try the typed text as a passphrase. Resolves true if it opened the vault. */
   tryUnlock: (candidate: string) => Promise<boolean>;
   onSave: (n: Note) => void;
@@ -16,22 +18,34 @@ type Props = {
   onCancel: () => void;
 };
 
-export default function NoteEditor({ note, tryUnlock, onSave, onDelete, onCancel }: Props) {
+export default function NoteEditor({ note, isNew, tryUnlock, onSave, onDelete, onCancel }: Props) {
   const [title, setTitle] = useState(note.title);
   const [body, setBody] = useState(note.body);
   const [checking, setChecking] = useState(false);
 
+  /**
+   * Whether this note is even shaped like a passphrase attempt.
+   *
+   * Key derivation is deliberately slow — two or three seconds on a phone — so
+   * running it on every save would make the cover story itself feel broken:
+   * jotting down a grocery list should not pause. A phrase is typed as the only
+   * line of a fresh, untitled note, so anything with a title, a second line, or
+   * an existing id is saved immediately without touching the KDF.
+   */
+  const looksLikeAttempt =
+    isNew &&
+    !title.trim() &&
+    !body.includes('\n') &&
+    body.trim().length >= 10 &&
+    body.trim().length <= 128;
+
   const done = async () => {
-    // Only one candidate: key derivation is deliberately slow, and trying both
-    // fields would double a freeze the user can feel. The phrase goes in the
-    // body; the title is checked only when the body is empty.
-    const candidate = body.trim() || title.trim();
-    if (candidate) {
+    if (looksLikeAttempt) {
       setChecking(true);
       // Yield a frame so the spinner paints before the KDF blocks the thread.
       await new Promise((r) => setTimeout(r, 30));
       // Vault opened: this text is never written down.
-      if (await tryUnlock(candidate)) return;
+      if (await tryUnlock(body.trim())) return;
       setChecking(false);
     }
     if (!title.trim() && !body.trim()) return onCancel();

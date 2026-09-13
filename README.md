@@ -6,8 +6,8 @@ On the home screen it is called **Notes**, it has a notepad icon, and if you
 open it you get a working notes app with groceries and a wifi password in it.
 There is no second tab, no login screen, and nothing that says "chat".
 
-Open a new note, type your phrase into it, and press **Done**. The note is
-never saved, and the chat opens instead.
+Open a new note, type your phrase as the only line in it, and press **Done**.
+The note is never saved, and the chat opens instead.
 
 ---
 
@@ -45,6 +45,10 @@ Do this once, together, on both phones.
 
 After that, the way back in is the note trick: new note → type the phrase → Done.
 
+It has to be a **new** note with **no title** and the phrase on **one line** —
+that is how the app knows to even try, and it is why writing an actual grocery
+list does not pause for two seconds every time you save it.
+
 The long-press still works too, as a fallback.
 
 > **Nobody can recover this phrase.** Not you, not us, not the relay. There is no
@@ -55,7 +59,7 @@ The long-press still works too, as a fallback.
 
 | | |
 |---|---|
-| Open the chat | New note → type the phrase → **Done** |
+| Open the chat | New note → type the phrase as the only line → **Done** |
 | Close it fast | **Close** in the top-left, or just switch apps |
 | Voice call | **Call** |
 | Video call | **Video** |
