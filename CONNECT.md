@@ -117,6 +117,21 @@ phone that is already set up.
 
 ---
 
+## Step 4 — Using it
+
+Open the app, tap **+** for a new note, type your PIN, press **Done**. The chat
+opens and the note is never saved.
+
+- **Message** — type and Send.
+- **Call** — voice.
+- **Video** — video. The other phone rings; they tap Accept.
+- **Close** — leaves instantly and wipes the conversation.
+
+The first time you make a call, Android asks for microphone and camera
+permission. Allow it, or calls will not work.
+
+---
+
 ## If a phone reinstalls the app
 
 Uninstalling takes **everything** with it: the vault, the PIN, the statuses, the
@@ -162,32 +177,32 @@ The QR code gives you the same "it just works" feeling with none of it. The
 secret goes from one screen into the other phone's camera and touches nothing
 else.
 
-## Step 4 — Using it
 
-Open the app, tap **+** for a new note, type your PIN, press **Done**. The chat
-opens and the note is never saved.
 
-- **Message** — type and Send.
-- **Call** — voice.
-- **Video** — video. The other phone rings; they tap Accept.
-- **Close** — leaves instantly and wipes the conversation.
+## What waits for you, and what does not
 
-The first time you make a call, Android asks for microphone and camera
-permission. Allow it, or calls will not work.
+**Text waits.** Send a message while the other person is out of the app and the
+relay holds it — as ciphertext it cannot read — until they open it. They get it
+then, with a note saying how many arrived while they were away. The ticks tell
+you where a message is:
 
----
+| | |
+|---|---|
+| `·` | on its way |
+| `✓` | the relay is holding it for them |
+| `✓✓` | their phone has it |
+| `!` | it never got through |
 
-## Both of you must be in the app at the same time
+**Pictures, video and voice notes do not wait.** Those only send when you are
+both in the app, and you are told rather than the picture being queued. A text
+is small and opaque; queueing your photos on a server is the thing this app
+exists not to do.
 
-There are **no notifications**, and a message sent while the other person is out
-of the app does not arrive later — there is nowhere for it to wait.
-
-This is the design, not a missing feature. Push notifications would mean Google's
-servers and a device token permanently identifying the phone; keeping the
-connection alive in the background would mean a foreground service, which Android
-shows as a permanent notification — not a look a notes app can carry.
-
-So: agree a time, or send an ordinary text saying "now", and both open the app.
+**There are still no notifications.** Nothing rings or buzzes when a message
+arrives — you find out by opening the app. A notification would mean Google's
+servers and a device token permanently identifying the phone, and keeping the
+connection alive in the background would mean a foreground service, which
+Android shows as a permanent notification: not a look a notes app can carry.
 
 ---
 
