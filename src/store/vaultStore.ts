@@ -4,7 +4,8 @@
  *  random-looking bytes. Nothing names a chat app, a relay, or a person.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { seal, unseal, type VaultBlob } from '../crypto/vault';
+import { seal, unseal, toHex, type VaultBlob } from '../crypto/vault';
+import { randomBytes } from '../crypto/random';
 
 const MARKER_KEY = '@nt/idx';
 const SETTINGS_KEY = '@nt/cache';
@@ -72,6 +73,18 @@ export type VaultSettings = {
    * is nothing left to be notified about.
    */
   quietNotifications: boolean;
+  /**
+   * A random id for this install, sent to the relay with every join.
+   *
+   * Its only job is letting the relay recognise a phone reconnecting and drop
+   * that phone's own previous socket. Without it, restarting the app races its
+   * own ghost and the owner is refused with "someone else is already using this
+   * passphrase" — where the someone else was them.
+   *
+   * It says nothing about the person or the device: random bytes, stored
+   * encrypted, and only ever seen by a relay that already sees the room id.
+   */
+  deviceId: string;
 };
 
 export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
@@ -83,6 +96,7 @@ export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
   pairedOnce: false,
   sendReadReceipts: true,
   quietNotifications: false,
+  deviceId: toHex(randomBytes(16)),
 });
 
 export async function readMarker(): Promise<VaultBlob | null> {
@@ -111,7 +125,9 @@ export async function readSettings(key: Uint8Array): Promise<VaultSettings> {
   try {
     const raw = await AsyncStorage.getItem(SETTINGS_KEY);
     if (!raw) return defaultSettings();
-    return { ...defaultSettings(), ...JSON.parse(unseal(key, raw)) };
+    const stored = { ...defaultSettings(), ...JSON.parse(unseal(key, raw)) };
+    if (!stored.deviceId) stored.deviceId = toHex(randomBytes(16));
+    return stored;
   } catch {
     return defaultSettings();
   }

@@ -420,7 +420,7 @@ export default function App() {
         persistOutbox();
         markDelivered(id, 'delivered');
       },
-    });
+    }, cfg.deviceId);
     sigRef.current = sig;
     sig.connect();
   }, [applyEnvelope, buildPeer, flushOutbox, markDelivered, persistOutbox, pushSystem, setCall]);

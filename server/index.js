@@ -78,6 +78,8 @@ wss.on('connection', (ws) => {
   ws.isAlive = true;
   ws.roomId = null;
   ws.role = null;
+  /** Stable per-install id, so a reconnect can replace its own dead socket. */
+  ws.device = null;
   ws.lastSeen = Date.now();
 
   ws.on('pong', () => {
@@ -101,6 +103,7 @@ wss.on('connection', (ws) => {
       if (!/^[0-9a-f]{32}$/.test(id)) return ws.close();
 
       const room = rooms.get(id) || emptyRoom();
+      const device = typeof msg.device === 'string' ? msg.device.slice(0, 64) : null;
 
       // Drop anything in the room that has already failed a ping. Without this
       // a phone that was killed (battery, force-stop, crashed emulator) holds
@@ -114,12 +117,32 @@ wss.on('connection', (ws) => {
         }
       });
 
+      // A phone reconnecting displaces its own previous socket.
+      //
+      // Without this, restarting the app races its own ghost: the old
+      // connection is still OPEN as far as the server knows — TCP has not
+      // noticed the app is gone and the next ping is up to 30 seconds away — so
+      // the room looks full and the returning owner is turned away with
+      // "someone else is already using this passphrase". Which was true, and
+      // the someone else was them.
+      if (device) {
+        [...room.clients].forEach((c) => {
+          if (c.device === device) {
+            room.clients.delete(c);
+            try {
+              c.terminate();
+            } catch {}
+          }
+        });
+      }
+
       if (room.clients.size >= MAX_ROOM) {
         send(ws, { t: 'full' });
         return ws.close();
       }
 
       ws.roomId = id;
+      ws.device = device;
       // Take whichever slot is actually free, rather than inferring it from the
       // count, which is stale whenever a socket died without closing.
       ws.role = [...room.clients].some((c) => c.role === 'a') ? 'b' : 'a';

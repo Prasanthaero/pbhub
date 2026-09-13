@@ -37,12 +37,20 @@ export class Signaling {
 
   private url: string;
   private roomId: string;
+  private deviceId: string;
   private key: Uint8Array;
   private ev: SignalingEvents;
 
-  constructor(url: string, roomId: string, key: Uint8Array, ev: SignalingEvents) {
+  constructor(
+    url: string,
+    roomId: string,
+    key: Uint8Array,
+    ev: SignalingEvents,
+    deviceId = '',
+  ) {
     this.url = url;
     this.roomId = roomId;
+    this.deviceId = deviceId;
     this.key = key;
     this.ev = ev;
   }
@@ -68,7 +76,7 @@ export class Signaling {
 
     ws.onopen = () => {
       this.retry = 0;
-      ws.send(JSON.stringify({ t: 'join', room: this.roomId }));
+      ws.send(JSON.stringify({ t: 'join', room: this.roomId, device: this.deviceId }));
     };
 
     ws.onmessage = (e) => {
@@ -113,9 +121,12 @@ export class Signaling {
           this.ev.onAck(String(msg.id));
           break;
         case 'full':
-          this.closedByUs = true;
-          this.ev.onClosed('Someone else is already using this passphrase.');
+          // Almost always our own previous socket, not a third person: the
+          // relay has not noticed it is gone yet. Keep retrying rather than
+          // stopping dead — it clears within a sweep, and giving up left the
+          // owner staring at "offline" with no way forward.
           ws.close();
+          this.scheduleRetry('Reconnecting…');
           break;
       }
     };

@@ -66,9 +66,11 @@ export default function VaultSettingsScreen({
       keepHistory: keep,
       sendReadReceipts: receipts,
       quietNotifications: quiet,
-      // Not a user setting — it records that the two phones have actually met,
-      // so saving other settings must not quietly reset it.
+      // Neither of these is a user setting: one records that the two phones
+      // have actually met, the other identifies this install to the relay.
+      // Saving other settings must not quietly reset either.
       pairedOnce: settings.pairedOnce,
+      deviceId: settings.deviceId,
     });
   };
 

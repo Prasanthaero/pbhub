@@ -127,6 +127,46 @@ try {
   c1.s.close(); c2.s.close();
   await wait(300);
 
+  console.log('reconnecting over your own ghost');
+  // The reported bug: restart the app and you are refused entry to your own
+  // room, because the relay still believes your previous socket is live. TCP
+  // has not noticed, and the next ping is up to 30 seconds away.
+  // (the previous section left the room empty)
+
+  const DEVICE = 'test-device-aaaa';
+  const first = new WsClient(URL);
+  await once(first, 'open');
+  first.send(JSON.stringify({ t: 'join', room: keys.roomId, device: DEVICE }));
+  await wait(300);
+
+  const partner = new WsClient(URL);
+  await once(partner, 'open');
+  partner.send(JSON.stringify({ t: 'join', room: keys.roomId, device: 'the-other-phone' }));
+  await wait(300);
+  // Room is now full, and the first socket is about to die uncleanly.
+  first._socket.destroy();
+
+  // Immediately back, before any sweep could have noticed.
+  const again = new WsClient(URL);
+  await once(again, 'open');
+  again.send(JSON.stringify({ t: 'join', room: keys.roomId, device: DEVICE }));
+
+  const reply = await new Promise((resolve) => {
+    again.on('message', (m) => resolve(JSON.parse(m)));
+    setTimeout(() => resolve({ t: 'timeout' }), 4000);
+  });
+
+  assert.notEqual(reply.t, 'full', 'the phone was refused entry to its own room');
+  assert.equal(reply.t, 'joined');
+  ok('a phone returning immediately displaces its own dead socket, rather than being refused');
+
+  assert.equal(partner.readyState, partner.OPEN);
+  ok("...and the partner's connection is left alone");
+
+  again.close();
+  partner.close();
+  await wait(300);
+
   console.log('departure');
   const d1 = client('D1', keys); await wait(400);
   const d2 = client('D2', keys); await wait(400);
