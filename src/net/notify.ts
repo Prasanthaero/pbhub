@@ -20,8 +20,30 @@
  * token that identifies the phone, or a permanent notification saying the app
  * is running. Both cost more than they are worth here, and the setting says so.
  */
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+
+/**
+ * Loaded through a guard, because it does not survive Expo Go.
+ *
+ * Expo Go dropped push notifications in SDK 53, and expo-notifications throws
+ * while it is still loading there — not when something is posted, but on
+ * import, which takes the whole app down before it draws. Nothing here needs
+ * push: this is a local notification, the kind Expo Go still supports. It is
+ * the library's own startup check that objects.
+ *
+ * Where it cannot load, every function below quietly does nothing. That costs
+ * the dot in the status bar while testing in Expo Go, and costs the real app
+ * nothing at all.
+ */
+type NotificationsModule = typeof import('expo-notifications');
+
+let Notifications: NotificationsModule | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  Notifications = require('expo-notifications') as NotificationsModule;
+} catch {
+  Notifications = null;
+}
 
 const CHANNEL = 'quiet';
 
@@ -35,6 +57,7 @@ let ready = false;
  * status bar too, which defeats the point.
  */
 export async function prepareNotifications(): Promise<boolean> {
+  if (!Notifications) return false;
   try {
     const existing = await Notifications.getPermissionsAsync();
     const granted = existing.granted
@@ -70,7 +93,7 @@ export async function prepareNotifications(): Promise<boolean> {
  * messages produce one dot rather than a stack that betrays how much was said.
  */
 export async function showDot(): Promise<void> {
-  if (!ready) return;
+  if (!ready || !Notifications) return;
   try {
     await Notifications.scheduleNotificationAsync({
       identifier: 'dot',
@@ -93,6 +116,7 @@ export async function showDot(): Promise<void> {
 
 /** Clear it — called when the chat is opened, since the dot has done its job. */
 export async function clearDot(): Promise<void> {
+  if (!Notifications) return;
   try {
     await Notifications.dismissNotificationAsync('dot');
   } catch {}
