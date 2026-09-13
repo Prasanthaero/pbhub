@@ -103,7 +103,7 @@ picture, including the parts that are not perfect.
 
 ### Your phrase never leaves the phone, and is never stored
 
-The phrase is stretched with PBKDF2-HMAC-SHA512 (250,000 rounds) into a master
+The phrase is stretched with PBKDF2-HMAC-SHA256 (40,000 rounds) into a master
 key. From that, three things are derived:
 
 - a **room id** — what the relay sees
@@ -165,9 +165,40 @@ So the salt is a constant, and the consequence is real: someone could precompute
 a dictionary once and try it against every user of this app, instead of paying
 that cost per person.
 
-**The entire defence is the strength of your phrase.** Four or five ordinary
-words chosen unpredictably are far past what any precomputation can reach.
-`iloveyou2` is not, with or without a salt. This is why setup nags you.
+**The entire defence is the strength of your phrase**, which is why setup offers
+to make one for you. Tap "Make one up for us" and you get seven words drawn
+byte-by-byte from the system random generator over a 256-word list — 56 bits,
+with no human choice anywhere in it:
+
+> box earth elder ginger bed hill bike
+
+Seven random words are far past what any precomputation can reach. `iloveyou2`
+is not, with or without a salt. Use the generator.
+
+### Why the round count looks low
+
+40,000 rounds is well under what you would use for a password database, and that
+is deliberate rather than an oversight.
+
+The app runs in Hermes, which has no JIT. The first version used
+PBKDF2-HMAC-SHA512 at 250,000 rounds — half a second on a laptop, and **over a
+minute on the phone**, because SHA-512 needs 64-bit arithmetic that Hermes
+emulates with pairs of 32-bit operations. Measured on an emulator:
+
+| KDF | Rounds | Laptop | Phone |
+|---|---|---|---|
+| PBKDF2-SHA512 | 250,000 | ~0.5s | >60s |
+| PBKDF2-SHA256 | 120,000 | — | 5.3s |
+| PBKDF2-SHA256 | 40,000 | ~0.09s | **1.8s** |
+
+The deeper reason is that stretching is the wrong lever here. Against a constant
+salt the attacker precomputes once no matter how high the count goes, so the
+work factor buys far less than it does with per-user salts. Entropy in the
+phrase is what actually protects you — hence the generator above.
+
+The app logs the derivation time (duration only, never the phrase) so a
+regression on a slower device shows up in `adb logcat` instead of looking like
+a freeze.
 
 ### What this is not
 
