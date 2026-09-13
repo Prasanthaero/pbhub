@@ -47,12 +47,26 @@ export default function VaultSettingsScreen({
     });
   };
 
+  /**
+   * The warning has to answer the question people actually have afterwards,
+   * which is not "is this permanent" but "can I get back in".
+   *
+   * Destroying erases this phone's copy — the vault, the PIN, the statuses, the
+   * chat. It does not destroy the conversation: the room comes from the pairing
+   * words, so anyone holding those can set up again and land in the same place.
+   * Saying so here is the difference between a reversible mistake and a lost
+   * conversation.
+   */
   const confirmDestroy = () =>
     Alert.alert(
-      'Destroy',
-      'This erases the vault from this phone. Afterwards this is only a notes app, and the phrase opens nothing. This cannot be undone.',
+      'Destroy the vault on this phone?',
+      'This erases the PIN, the statuses and the chat. Afterwards this is only a notes app.\n\n'
+      + 'You can come back by setting up again with the same pairing words — they are on the '
+      + 'other phone, and wherever you wrote them down. Without them, nobody can get back in, '
+      + 'including you.',
       [
         { text: 'Cancel', style: 'cancel' },
+        { text: 'Show me the words first', onPress: () => setShowPairing(true) },
         { text: 'Destroy', style: 'destructive', onPress: onDestroy },
       ],
     );
