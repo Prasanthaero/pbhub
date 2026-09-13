@@ -96,12 +96,11 @@ is worth getting right:
 
 ### Open the right folder
 
-**Open `pbhubandroid`, not `pbhub`.** The project root is a Node project and
-Android Studio will not recognise it. The Gradle project is the `android`
-subfolder:
+**Open the `android` subfolder, not the project root.** The root is a Node
+project and Android Studio will not recognise it. Open exactly this:
 
 ```
-D:my appsMOBILE APPSpbhubandroid
+D:\my apps\MOBILE APPS\pbhub\android
 ```
 
 Let it finish "Gradle sync" the first time. Then the green Run button builds and
