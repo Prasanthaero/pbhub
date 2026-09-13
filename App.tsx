@@ -980,6 +980,7 @@ export default function App() {
     return (
       <NotesList
         notes={notes}
+        showSetupHint={!hasVault}
         onOpen={(n) => {
           setActive(n);
           setActiveIsNew(false);

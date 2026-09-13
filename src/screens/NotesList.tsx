@@ -8,6 +8,19 @@ import type { Note } from '../store/notes';
 
 type Props = {
   notes: Note[];
+  /**
+   * True only before a vault has ever been created on this phone.
+   *
+   * The way in is a long-press on the title, which nobody would ever guess —
+   * that is the point once a vault exists, and a serious problem before one
+   * does: a fresh install gives no way to set anything up, and typing a PIN
+   * into a note does nothing and says nothing about why.
+   *
+   * Showing the gesture only while there is no vault costs nothing. Anyone
+   * seeing this hint is looking at an app with no secret in it yet, and a
+   * stranger who installs it themselves learns nothing about anybody.
+   */
+  showSetupHint: boolean;
   onOpen: (n: Note) => void;
   onNew: () => void;
   /** Long-press the title. The only entrance that exists before a vault does. */
@@ -22,7 +35,9 @@ const when = (ts: number) => {
   return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
 };
 
-export default function NotesList({ notes, onOpen, onNew, onSecretGesture }: Props) {
+export default function NotesList({
+  notes, showSetupHint, onOpen, onNew, onSecretGesture,
+}: Props) {
   return (
     <SafeAreaView style={s.wrap} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor={T.paper} />
@@ -43,6 +58,19 @@ export default function NotesList({ notes, onOpen, onNew, onSecretGesture }: Pro
           </TouchableOpacity>
         )}
         ListEmptyComponent={<Text style={s.empty}>Nothing here yet.</Text>}
+        ListFooterComponent={
+          showSetupHint ? (
+            <TouchableOpacity style={s.hint} onPress={onSecretGesture} activeOpacity={0.7}>
+              <Text style={s.hintText}>
+                Press and hold the word <Text style={s.hintStrong}>Notes</Text> above to set up.
+              </Text>
+              <Text style={s.hintSub}>
+                This only appears until you have. Afterwards the hold is the only way in, and
+                nothing on this screen mentions it.
+              </Text>
+            </TouchableOpacity>
+          ) : null
+        }
       />
 
       <TouchableOpacity style={s.fab} onPress={onNew} activeOpacity={0.85}>
@@ -64,6 +92,13 @@ const s = StyleSheet.create({
   body: { fontSize: 14, color: T.inkSoft, marginTop: 4, lineHeight: 19 },
   date: { fontSize: 11, color: T.inkSoft, marginTop: 8 },
   empty: { textAlign: 'center', color: T.inkSoft, marginTop: 60 },
+  hint: {
+    marginTop: 28, marginHorizontal: 4, padding: 16, borderRadius: 12,
+    borderWidth: 1, borderColor: T.line, borderStyle: 'dashed',
+  },
+  hintText: { color: T.inkSoft, fontSize: 13.5, lineHeight: 20 },
+  hintStrong: { color: T.ink, fontWeight: '700' },
+  hintSub: { color: T.inkSoft, fontSize: 11.5, lineHeight: 16, marginTop: 6, opacity: 0.8 },
   fab: {
     position: 'absolute', right: 22, bottom: 34, width: 60, height: 60, borderRadius: 30,
     backgroundColor: T.ink, alignItems: 'center', justifyContent: 'center',
