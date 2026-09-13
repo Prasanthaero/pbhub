@@ -93,9 +93,18 @@
           "sounds": []
         }
       ],
+      "./plugins/withGradleMemory",
       "./plugins/withKeyboardInsets",
       "./plugins/withAbiSplits"
     ],
-    "scheme": "notes"
+    "scheme": "notes",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
+    }
   }
 }

@@ -35,6 +35,15 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "channel": "production"
+    },
+    "production": {
+      "//": "The APK you hand to the two phones. Its channel is what `eas update --branch production` publishes to, so a build made here can pick up JavaScript changes later without another install.",
+      "distribution": "internal",
+      "channel": "production",
+      "android": {
+        "buildType": "apk"
       }
     }
   }

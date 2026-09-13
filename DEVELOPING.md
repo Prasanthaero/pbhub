@@ -29,15 +29,33 @@ The files you will actually edit:
 | Encryption | `src/crypto/vault.ts` |
 | The relay server | `server/index.js` |
 
-## Important: Expo Go does not work here
+## Expo Go runs it, but cannot show you everything
 
-The usual Expo workflow — install "Expo Go" from the Play Store, scan a QR code
-— **will not run this app.** Expo Go only contains the native code Expo ships
-with it, and this app uses `react-native-webrtc` for the calls, which is not in
-there. You would get a red error screen about a missing native module.
+Expo Go only contains the native code Expo ships inside it, and it cannot be
+extended. Everything this app needs that is not in there loads through a guard,
+so the app comes up rather than dying on a red screen — but what those pieces do
+is missing while you are a guest:
 
-Instead you build the app **once** onto the emulator or phone, and after that
-your JavaScript changes reload instantly without rebuilding.
+| | Expo Go | A real build |
+|---|---|---|
+| Chat, photos, status, notes | yes, through the relay | yes |
+| Voice and video calls | **no** — `react-native-webrtc` is not there | yes |
+| The dot in the status bar | **no** — Expo Go dropped notifications in SDK 53 | yes |
+| Keyboard and navigation bar | approximated in JavaScript | handled by the activity |
+
+That last row is the one that catches people. `plugins/withKeyboardInsets.js`
+lives in the activity, and in Expo Go the activity belongs to Expo Go. The app
+detects that (`src/env.ts`) and does what it can from JavaScript instead, but the
+result is not what your users will see. **Judge layout at the bottom of the
+screen on a real build, never in Expo Go.**
+
+```bash
+npx expo start --go
+```
+
+For a loop that is just as fast and tells the truth, build a development client
+once — see "Running it" below. It installs beside the real app as
+`com.pb.notes.dev`, so the real one keeps its vault.
 
 ## Running it
 
@@ -222,6 +240,49 @@ android/app/build/outputs/apk/release/app-release.apk
 Copy that file to both phones and install it. Android will warn about
 installing from an unknown source; that is normal for an app not on the Play
 Store.
+
+Install it **over** the existing app. Do not uninstall first — that takes the
+vault, the pairing and the notes with it.
+
+## Updating the phones without handing over a new APK
+
+The app is not on any store, so nothing tells a phone that a new version exists.
+`expo-updates` is wired in so that JavaScript changes can be fetched by the app
+itself; the last step needs an Expo account, so it has to be done by hand once.
+
+```bash
+npx eas-cli login
+npx eas-cli init
+npx eas-cli update:configure
+```
+
+`update:configure` writes `updates.url` into app.json. Until it does, the feature
+stays switched off — `app.config.js` keys `updates.enabled` off that url, so a
+build made before this point simply has no updating in it.
+
+Then build the APK **once more** and install that on both phones. From then on:
+
+```bash
+npx eas-cli update --branch production --message "what changed"
+```
+
+The phones pick it up the next time the app is opened.
+
+What this does and does not carry:
+
+- **Carries:** anything in `src/`, `App.tsx` — screens, layout, wording, logic.
+- **Does not carry:** native changes. A new module, a new permission, anything in
+  `plugins/`. `runtimeVersion` is on the `fingerprint` policy, so a build with
+  different native code simply will not accept an update meant for another one.
+  That is the safe failure: a stale app, never a broken one. Those still need a
+  new APK by hand.
+
+The privacy cost, stated plainly because this app is built around not having one:
+with updates configured, the phone asks Expo's servers whether new code exists
+every time the app opens. No message, photo or key goes anywhere near it. What it
+does reveal to a third party is an IP address and the times of day the app gets
+opened. Leaving `updates.url` unset keeps the app silent, at the cost of carrying
+APKs around by hand.
 
 ## Things that will bite you
 

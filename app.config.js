@@ -25,6 +25,17 @@ const isDevBuild =
 module.exports = () => {
   const expo = { ...base.expo };
 
+  /**
+   * Over-the-air updates stay switched off until there is somewhere to ask.
+   *
+   * `eas update:configure` is what writes `updates.url` into app.json, and it
+   * needs an Expo account, so it cannot be done from here. Until it has been
+   * run, a build with expo-updates in it and no address to check would either
+   * complain at build time or sit there asking nothing. Keyed off the url, the
+   * feature simply is not there yet, and turns itself on the moment it is.
+   */
+  expo.updates = { ...base.expo.updates, enabled: Boolean(base.expo.updates?.url) };
+
   if (isDevBuild) {
     expo.plugins = [...expo.plugins, 'expo-dev-client'];
 
