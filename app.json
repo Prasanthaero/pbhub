@@ -92,7 +92,8 @@
           "color": "#C9A227",
           "sounds": []
         }
-      ]
+      ],
+      "./plugins/withAbiSplits"
     ],
     "scheme": "notes"
   }
