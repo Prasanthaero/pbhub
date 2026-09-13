@@ -196,7 +196,7 @@ export default function Chat({
           <TouchableOpacity
             style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}
             activeOpacity={0.8}
-            onPress={() => theirStatus.image && setStatusView(theirStatus)}
+            onPress={() => setStatusView(theirStatus)}
           >
             {!!theirStatus.image && (
               <Image source={{ uri: theirStatus.image.uri }} style={s.statusThumb} />
@@ -205,7 +205,7 @@ export default function Chat({
               <Text style={s.theirStatus} numberOfLines={2}>
                 {theirStatus.text || 'Shared a picture'}
               </Text>
-              <Text style={s.statusMeta}>{timeLeft(theirStatus)}</Text>
+              <Text style={s.statusMeta}>{timeLeft(theirStatus)} · tap to open</Text>
             </View>
           </TouchableOpacity>
         ) : (
@@ -213,7 +213,11 @@ export default function Chat({
             <Text style={s.noStatus}>No status from them</Text>
           </View>
         )}
-        <TouchableOpacity style={s.statusBtn} onPress={openStatus}>
+        <TouchableOpacity
+          style={s.statusBtn}
+          onPress={openStatus}
+          onLongPress={() => isLive(myStatus) && setStatusView(myStatus)}
+        >
           <Text style={s.statusBtnText}>
             {isLive(myStatus) ? 'Your status' : 'Set status'}
           </Text>
@@ -409,7 +413,11 @@ export default function Chat({
           {statusView?.image && (
             <Image source={{ uri: statusView.image.uri }} style={s.viewerImage} resizeMode="contain" />
           )}
-          {!!statusView?.text && <Text style={s.statusCaption}>{statusView.text}</Text>}
+          {!!statusView?.text && (
+            <Text style={statusView.image ? s.statusCaption : s.statusOnly} selectable>
+              {statusView.text}
+            </Text>
+          )}
           <Text style={s.viewerHint}>
             {statusView ? timeLeft(statusView) : ''} · tap to close
           </Text>
@@ -557,6 +565,10 @@ const s = StyleSheet.create({
   statusPhotoText: { color: T.accent, fontSize: 14, fontWeight: '600' },
   statusCaption: {
     color: '#fff', fontSize: 16, textAlign: 'center', paddingHorizontal: 28, marginTop: 16,
+  },
+  /** No picture: the words are the whole thing, so give them the room. */
+  statusOnly: {
+    color: '#fff', fontSize: 22, lineHeight: 32, textAlign: 'center', paddingHorizontal: 32,
   },
   viewer: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   viewerImage: { width: '100%', height: '85%' },
