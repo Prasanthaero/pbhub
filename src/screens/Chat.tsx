@@ -400,8 +400,8 @@ export default function Chat({
         <View style={s.notPaired}>
           <Text style={s.notPairedTitle}>Not paired yet</Text>
           <Text style={s.notPairedBody}>
-            One of you makes the code, the other scans it. Both phones must show the same code
-            under •••.
+            Both phones need the same two numbers — or the same QR code, if you paired that way.
+            The short code under ••• must match on both.
           </Text>
         </View>
       )}

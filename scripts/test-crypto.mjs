@@ -216,5 +216,54 @@ ok('re-sealing keeps the same secret, room and message key — no re-pairing');
 assert.equal(openVault(upgraded.blob, 'wrong'), null);
 ok('and the new blob still refuses the wrong PIN');
 
+// ---------------------------------------------------------------------------
+// Pairing from the two phone numbers. Two phones that disagree by one character
+// land in different rooms and wait for each other forever, so the agreement
+// rules are worth pinning down.
+// ---------------------------------------------------------------------------
+const { normalisePhone, pairingFromNumbers } = await import('../src/crypto/phonePairing.ts');
+
+console.log('');
+console.log('pairing from two phone numbers');
+
+const A = '+91 98765 43210';
+const B = '9123456789';
+
+const fromA = pairingFromNumbers(A, B);
+const fromB = pairingFromNumbers(B, A);
+assert.ok(fromA);
+assert.equal(hex(fromA), hex(fromB));
+ok('both phones derive the same secret whichever order they type the numbers');
+
+assert.equal(fromA.length, PAIRING_BYTES);
+assert.equal(createVault(PIN, fromA).keys.roomId, createVault('other', fromB).keys.roomId);
+ok('...and land in the same room, with their own separate PINs');
+
+for (const written of ['+919876543210', '09876543210', '98765-43210', '(98765) 43210', '91 98765 43210']) {
+  assert.equal(
+    hex(pairingFromNumbers(written, B)),
+    hex(fromA),
+    `"${written}" should agree with "${A}"`,
+  );
+}
+ok('country code, spaces, dashes, brackets and a leading zero are all the same number');
+
+assert.notEqual(hex(pairingFromNumbers(A, '9123456788')), hex(fromA));
+ok('one digit different is a different room, not a near miss');
+
+assert.equal(pairingFromNumbers(A, A), null);
+ok('the same number twice is refused rather than pairing a phone with itself');
+
+for (const bad of ['', '123', 'hello', '  ', '12-34']) {
+  assert.equal(normalisePhone(bad), null, `"${bad}" should not be accepted as a number`);
+  assert.equal(pairingFromNumbers(bad, B), null);
+}
+ok('too short or not a number at all is refused');
+
+// The reduction this buys its convenience with, stated as a test so it cannot
+// be forgotten: the secret is a function of the numbers alone.
+assert.equal(hex(pairingFromNumbers(A, B)), hex(pairingFromNumbers(A, B)));
+ok('the same two numbers always give the same secret — no randomness, by design');
+
 console.log(``);
 console.log(`${pass} checks passed`);

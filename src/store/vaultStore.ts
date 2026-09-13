@@ -11,14 +11,20 @@ const MARKER_KEY = '@nt/idx';
 const SETTINGS_KEY = '@nt/cache';
 
 /**
- * There is no default relay on purpose.
+ * The relay this build was made for.
  *
- * Shipping someone else's address here would mean every pair of users funnels
- * their rendezvous through a machine none of them control, and a hardcoded
- * URL that later goes dark would break the app silently. Deploy `server/`
- * somewhere (render.yaml is in the repo) and enter that address during setup.
+ * There used to be no default, on the reasoning that a hardcoded address means
+ * funnelling other people's rendezvous through a machine they do not control.
+ * That reasoning does not apply to a build made for one couple who own the
+ * relay: asking them to type `wss://` and a hostname they have to go and look
+ * up was the single most awkward thing in setting the app up, and it is the
+ * same answer every time.
+ *
+ * Still editable in Settings, so moving the relay does not mean a new build.
+ * Anyone forking this should put their own `server/` deployment here —
+ * render.yaml is in the repo.
  */
-export const DEFAULT_RELAY = '';
+export const DEFAULT_RELAY = 'wss://pbhub-7vob.onrender.com';
 
 /** Shown as placeholder text, so the expected shape is obvious. */
 export const RELAY_EXAMPLE = 'wss://your-relay.onrender.com';

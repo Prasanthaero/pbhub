@@ -6,10 +6,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { T } from '../theme';
 import { inExpoGo } from '../env';
-import { RELAY_EXAMPLE } from '../store/vaultStore';
+import { DEFAULT_RELAY } from '../store/vaultStore';
 import {
   generatePairingSecret, bytesToWords, wordsToBytes, PAIRING_BYTES,
 } from '../crypto/wordlist';
+import { normalisePhone, pairingFromNumbers } from '../crypto/phonePairing';
 import PairScreen from './PairScreen';
 
 type Props = {
@@ -25,11 +26,14 @@ const DEFAULT_PIN = '110490';
 export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) {
   const [pin, setPin] = useState(mode === 'setup' ? DEFAULT_PIN : '');
   const [pin2, setPin2] = useState(mode === 'setup' ? DEFAULT_PIN : '');
+  const [myNumber, setMyNumber] = useState('');
+  const [theirNumber, setTheirNumber] = useState('');
   const [pairing, setPairing] = useState('');
-  const [relay, setRelay] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [generated, setGenerated] = useState(false);
+  /** The old way, kept but folded away: phrase and QR instead of numbers. */
+  const [phraseWay, setPhraseWay] = useState(false);
   /** The QR sheet: showing this phone's code, or scanning the other's. */
   const [pairing_open, setPairingOpen] = useState(false);
 
@@ -74,22 +78,30 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
     if (pin.trim().length > 64) return setErr('That PIN is too long to type into a note.');
     if (pin !== pin2) return setErr('The two PINs do not match.');
 
-    const secret = wordsToBytes(pairing);
-    if (!secret) {
-      return setErr(
-        pairing.trim()
-          ? `That is not a valid pairing phrase. It is ${PAIRING_BYTES} words from this app — check for a typo.`
-          : 'Make a pairing phrase, or type in the one from the other phone.',
-      );
-    }
-    if (!/^wss?:\/\/.+/i.test(relay.trim())) {
-      return setErr('Enter the address of your relay, starting with wss://');
+    let secret: Uint8Array | null;
+
+    if (phraseWay) {
+      secret = wordsToBytes(pairing);
+      if (!secret) {
+        return setErr(
+          pairing.trim()
+            ? `That is not a valid pairing phrase. It is ${PAIRING_BYTES} words from this app — check for a typo.`
+            : 'Make a pairing phrase, or type in the one from the other phone.',
+        );
+      }
+    } else {
+      if (!normalisePhone(myNumber)) return setErr('Enter your own phone number.');
+      if (!normalisePhone(theirNumber)) return setErr("Enter your partner's phone number.");
+      secret = pairingFromNumbers(myNumber, theirNumber);
+      if (!secret) {
+        return setErr('Those are the same number. One is yours, the other is theirs.');
+      }
     }
 
     setBusy(true);
     await new Promise((r) => setTimeout(r, 30));
     try {
-      await onSetup(pin, secret, relay);
+      await onSetup(pin, secret, DEFAULT_RELAY);
     } catch {
       setErr('Something went wrong.');
       setBusy(false);
@@ -163,44 +175,80 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           <Text style={s.h}>Set up</Text>
 
-          <Text style={s.step}>1 · Pairing phrase</Text>
-          <Text style={s.sub}>
-            This is what connects the two phones, and you only ever do it once. It is not the
-            thing you type to get in.
-          </Text>
-
-          <TouchableOpacity style={s.qrBtn} onPress={openPairing}>
-            <Text style={s.qrBtnText}>Use a QR code</Text>
-            <Text style={s.qrBtnSub}>
-              Show one phone's code to the other. Seconds, and nothing typed.
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={s.suggestBtn} onPress={makePairing}>
-            <Text style={s.suggestText}>
-              {generated ? 'Give me another' : 'Or make up words instead'}
-            </Text>
-          </TouchableOpacity>
-
-          {generated && !!pairing && (
-            <View style={s.suggestBox}>
-              <Text style={s.suggestPhrase}>{pairing}</Text>
-              <Text style={s.suggestNote}>
-                Write this down and type it into the other phone. Then you can forget it.
+          {!phraseWay ? (
+            <>
+              <Text style={s.step}>1 · The two phone numbers</Text>
+              <Text style={s.sub}>
+                Put the same two numbers into both phones, in either order. That is what connects
+                you. Nothing is sent anywhere and no code arrives by text — the numbers stay on the
+                phone.
               </Text>
-            </View>
-          )}
 
-          <TextInput
-            style={[s.input, generated && s.inputMuted]}
-            value={pairing}
-            onChangeText={(t) => { setPairing(t); setGenerated(false); }}
-            autoCapitalize="none"
-            autoCorrect={false}
-            multiline
-            placeholder={`or type the ${PAIRING_BYTES} words from the other phone`}
-            placeholderTextColor={T.vaultInkSoft}
-          />
+              <TextInput
+                style={s.input}
+                value={myNumber}
+                onChangeText={(t) => { setMyNumber(t); if (err) setErr(''); }}
+                keyboardType="phone-pad"
+                autoCorrect={false}
+                placeholder="your number"
+                placeholderTextColor={T.vaultInkSoft}
+              />
+              <TextInput
+                style={s.input}
+                value={theirNumber}
+                onChangeText={(t) => { setTheirNumber(t); if (err) setErr(''); }}
+                keyboardType="phone-pad"
+                autoCorrect={false}
+                placeholder="their number"
+                placeholderTextColor={T.vaultInkSoft}
+              />
+              <Text style={s.hint}>
+                Spaces, dashes and the country code do not matter. Both phones must use the same
+                two numbers.
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={s.step}>1 · Pairing phrase</Text>
+              <Text style={s.sub}>
+                The stronger way: eight random words that nobody can guess, carried from one phone
+                to the other. You only ever do it once.
+              </Text>
+
+              <TouchableOpacity style={s.qrBtn} onPress={openPairing}>
+                <Text style={s.qrBtnText}>Use a QR code</Text>
+                <Text style={s.qrBtnSub}>
+                  Show one phone's code to the other. Seconds, and nothing typed.
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={s.suggestBtn} onPress={makePairing}>
+                <Text style={s.suggestText}>
+                  {generated ? 'Give me another' : 'Or make up words instead'}
+                </Text>
+              </TouchableOpacity>
+
+              {generated && !!pairing && (
+                <View style={s.suggestBox}>
+                  <Text style={s.suggestPhrase}>{pairing}</Text>
+                  <Text style={s.suggestNote}>
+                    Write this down and type it into the other phone. Then you can forget it.
+                  </Text>
+                </View>
+              )}
+
+              <TextInput
+                style={[s.input, generated && s.inputMuted]}
+                value={pairing}
+                onChangeText={(t) => { setPairing(t); setGenerated(false); }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                multiline
+                placeholder={`or type the ${PAIRING_BYTES} words from the other phone`}
+                placeholderTextColor={T.vaultInkSoft}
+              />
+            </>
+          )}
 
           <Text style={s.step}>2 · Your PIN</Text>
           <Text style={s.sub}>
@@ -230,24 +278,6 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
             placeholderTextColor={T.vaultInkSoft}
           />
 
-          <Text style={s.step}>3 · Relay address</Text>
-          <Text style={s.sub}>
-            Two phones that have never met need something to introduce them. The relay does only
-            that: it sees a hash and ciphertext, keeps nothing, and drops out once you are
-            connected. Run your own — <Text style={s.mono}>server/</Text> in the project. Both of
-            you must use the same one.
-          </Text>
-          <TextInput
-            style={s.input}
-            value={relay}
-            onChangeText={setRelay}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            placeholder={RELAY_EXAMPLE}
-            placeholderTextColor={T.vaultInkSoft}
-          />
-
           {!!err && <Text style={s.err}>{err}</Text>}
 
           <TouchableOpacity style={[s.btn, busy && { opacity: 0.6 }]} onPress={go} disabled={busy}>
@@ -257,6 +287,19 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
           <Text style={s.note}>
             After this, you get in by opening a new note and typing your PIN into it.
           </Text>
+
+          <TouchableOpacity
+            onPress={() => { setPhraseWay(!phraseWay); setErr(''); }}
+            hitSlop={10}
+            style={{ marginTop: 18 }}
+          >
+            <Text style={s.swap}>
+              {phraseWay
+                ? 'Use the two phone numbers instead'
+                : 'Pair with a QR code instead — harder to set up, harder to break'}
+            </Text>
+          </TouchableOpacity>
+
           <View style={{ height: 40 }} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -282,6 +325,8 @@ const s = StyleSheet.create({
   },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   note: { color: T.vaultInkSoft, fontSize: 13, marginTop: 20, lineHeight: 19 },
+  hint: { color: T.vaultInkSoft, fontSize: 12.5, marginTop: -2, marginBottom: 4, lineHeight: 18 },
+  swap: { color: T.accent, fontSize: 14, fontWeight: '600', lineHeight: 20 },
   qrBtn: {
     backgroundColor: T.mine, borderRadius: 12, paddingVertical: 15, paddingHorizontal: 16,
     marginBottom: 10,
