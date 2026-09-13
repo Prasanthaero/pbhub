@@ -55,7 +55,7 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
       setBusy(true);
       await new Promise((r) => setTimeout(r, 30));
       if (!(await onUnlock(pin))) {
-        setErr('No.');
+        setErr('That is not the PIN for this phone.');
         setBusy(false);
       }
       return;
@@ -99,14 +99,19 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
           <TextInput
             style={s.input}
             value={pin}
-            onChangeText={setPin}
+            onChangeText={(t) => { setPin(t); if (err) setErr(''); }}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
-            keyboardType="number-pad"
-            placeholder="••••••"
+            // Deliberately the ordinary keyboard. This used to be a number pad,
+            // which locked out anyone whose PIN had a letter in it — setup
+            // accepts any characters, so this must too. A keyboard that cannot
+            // type the PIN the app itself allowed is not a small bug.
+            placeholder="your PIN"
             placeholderTextColor={T.vaultInkSoft}
             autoFocus
+            onSubmitEditing={go}
+            returnKeyType="go"
           />
           {!!err && <Text style={s.err}>{err}</Text>}
           <TouchableOpacity style={[s.btn, busy && { opacity: 0.6 }]} onPress={go} disabled={busy}>
