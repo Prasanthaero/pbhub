@@ -14,6 +14,9 @@ never saved, and the chat opens instead.
 ## What it does
 
 - **Two people only.** Not a group app. The room holds two devices and refuses a third.
+- **Live only.** No notifications and no offline delivery — you are both in the
+  app, or there is no conversation. See [below](#you-both-have-to-be-in-the-app-at-the-same-time)
+  for why that is the design and not an oversight.
 - **Text, voice and video**, all peer-to-peer over WebRTC.
 - **Nothing is stored.** Messages live in a JavaScript array and nowhere else —
   no database, no file, no cache. Closing the app empties it on both phones.
@@ -63,6 +66,29 @@ by default; you can turn it off in Settings if it gets annoying.
 
 Screenshots are blocked while the chat is open, and the app shows blank in the
 recent-apps switcher.
+
+### You both have to be in the app at the same time
+
+This is the one thing that will annoy you, and it is a direct consequence of
+everything above, so it is worth understanding rather than reporting as a bug.
+
+There are **no notifications**. Nothing rings, nothing buzzes, and a message sent
+while the other person is out of the app does not arrive later — it is not stored
+anywhere to arrive *from*.
+
+Delivering a message to a closed app requires a push notification. Push means
+Google's servers, a device token that identifies the phone, and a permanent
+registration tying this app to you — the precise things this app exists to avoid.
+Holding the connection open in the background instead would need a foreground
+service, which Android displays as a permanent notification, which rather
+undermines a notes app.
+
+So the working pattern is the old one: agree a time, or send a normal text
+saying "now", and both open the app.
+
+**What this costs you:** a message typed while your partner is away is simply
+gone. **What it buys you:** there is no server holding an undelivered message, no
+account linking the two of you, and nothing on either phone afterwards.
 
 ---
 
