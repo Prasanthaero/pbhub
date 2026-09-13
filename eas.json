@@ -1,0 +1,30 @@
+{
+  "cli": {
+    "version": ">= 5.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "ios-device": {
+      "//": "For putting it on your own two iPhones. 'internal' means the build is signed for specific registered devices rather than the App Store, which is what you want for an app that is never going to be listed.",
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      },
+      "channel": "ios-device"
+    },
+    "ios-simulator": {
+      "//": "Runs in the Mac simulator only. Needs no Apple Developer account at all, so it is the way to see the app on iOS before deciding to pay for anything. It cannot make calls — a simulator has no camera and no microphone worth the name.",
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      }
+    },
+    "android-apk": {
+      "//": "The same APK you already build locally, made in the cloud instead. Here so that both platforms come from one command if you ever want that.",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    }
+  }
+}

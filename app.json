@@ -21,8 +21,10 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Attach photos to your notes.",
         "NSMicrophoneUsageDescription": "Record voice memos for your notes.",
-        "ITSAppUsesNonExemptEncryption": false
-      }
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Attach pictures to your notes."
+      },
+      "buildNumber": "1"
     },
     "android": {
       "package": "com.pb.notes",
