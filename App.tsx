@@ -48,7 +48,15 @@ export default function App() {
   const peerRef = useRef<Peer | null>(null);
   const roleRef = useRef<Role>('a');
 
-  const [call, setCall] = useState<CallInfo | null>(null);
+  // Mirrored in a ref so peer callbacks can read the live call without being
+  // written as side effects inside a setState updater (which React is free to
+  // run more than once).
+  const [call, setCallState] = useState<CallInfo | null>(null);
+  const callRef = useRef<CallInfo | null>(null);
+  const setCall = useCallback((c: CallInfo | null) => {
+    callRef.current = c;
+    setCallState(c);
+  }, []);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [muted, setMuted] = useState(false);
@@ -127,11 +135,11 @@ export default function App() {
           setScreen('call');
         } else if (action === 'accept') {
           // The caller only reaches for the camera once the other side says yes.
-          setCall((c) => {
-            if (!c) return c;
+          const c = callRef.current;
+          if (c) {
+            setCall({ ...c, state: 'active' });
             peerRef.current?.openMedia(c.kind).catch(() => {});
-            return { ...c, state: 'active' };
-          });
+          }
         } else if (action === 'decline' || action === 'hangup') {
           peerRef.current?.closeMedia();
           setCall(null);
@@ -142,7 +150,7 @@ export default function App() {
     });
     peerRef.current = peer;
     return peer;
-  }, [pushSystem]);
+  }, [pushSystem, setCall]);
 
   const connect = useCallback((keys: VaultKeys, cfg: VaultSettings) => {
     const sig = new Signaling(cfg.relayUrl, keys.roomId, keys.msgKey, {

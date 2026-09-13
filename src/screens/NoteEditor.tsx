@@ -22,14 +22,16 @@ export default function NoteEditor({ note, tryUnlock, onSave, onDelete, onCancel
   const [checking, setChecking] = useState(false);
 
   const done = async () => {
-    const candidates = [body.trim(), title.trim()].filter(Boolean);
-    if (candidates.length) {
+    // Only one candidate: key derivation is deliberately slow, and trying both
+    // fields would double a freeze the user can feel. The phrase goes in the
+    // body; the title is checked only when the body is empty.
+    const candidate = body.trim() || title.trim();
+    if (candidate) {
       setChecking(true);
       // Yield a frame so the spinner paints before the KDF blocks the thread.
       await new Promise((r) => setTimeout(r, 30));
-      for (const c of candidates) {
-        if (await tryUnlock(c)) return; // Vault opened — this text is never written down.
-      }
+      // Vault opened: this text is never written down.
+      if (await tryUnlock(candidate)) return;
       setChecking(false);
     }
     if (!title.trim() && !body.trim()) return onCancel();
