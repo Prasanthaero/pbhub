@@ -90,11 +90,12 @@ adb install -r android/app/build/outputs/apk/release/app-release.apk
 
 1. Open **Notes**.
 2. **Long-press the word "Notes"** at the top for about a second and a half.
-3. Tap **"Make one up for us"**. You get eight words, for example:
+3. Tap **Use a QR code**. A code appears, with eight words underneath it:
 
    > broom frame bone coin otter island east hand
 
-   **Write them down.** You need them for the second phone.
+   **Write the words down and keep them somewhere that is not either phone.**
+   They are how you rebuild if a phone is ever lost or reinstalled.
 4. Leave the PIN as `110490`, or change it. This is what you will type to get in.
 5. Paste in your relay address from Step 1.
 6. **Create.** It thinks for about two seconds, then the chat opens.
@@ -102,8 +103,9 @@ adb install -r android/app/build/outputs/apk/release/app-release.apk
 **On the second phone:**
 
 1. Same: long-press **"Notes"**.
-2. **Type the same eight words** into the pairing box. Do *not* tap
-   "Make one up for us" — that would create a different, unconnected vault.
+2. **Use a QR code → Scan the other phone**, and point it at the first phone's
+   screen. Or type the same eight words in by hand. Do *not* make up new ones —
+   that would create a different, unconnected vault.
 3. Set its PIN. It does **not** have to match the first phone's.
 4. Paste **the same relay address**.
 5. **Create.**
@@ -114,6 +116,51 @@ If you lose the eight words, they are in **Settings (•••) → Pairing phra
 phone that is already set up.
 
 ---
+
+## If a phone reinstalls the app
+
+Uninstalling takes **everything** with it: the vault, the PIN, the statuses, the
+chat. That is the point — an uninstalled app leaves nothing behind. But it does
+mean the phone has to be paired again from scratch.
+
+**There is no account to sign back into, and no phone number to text a code to.**
+What you need is the pairing code, and the phone that still works has it.
+
+On the phone that still works:
+
+1. Open the chat and go to **Settings (•••)**.
+2. Under **Pairing phrase**, tap **Show the code and words**.
+
+On the phone that reinstalled:
+
+3. Long-press **"Notes"**, then **Use a QR code → Scan the other phone**, and
+   point it at that screen. Or type the eight words underneath it by hand.
+4. Set a PIN (it does not have to be the one it had before) and enter the same
+   relay address.
+5. **Create.** It is back in the same conversation.
+
+Old messages do not come back — they were never stored anywhere to come back
+from. Statuses on the reinstalled phone are gone too; the other phone's are
+still there and arrive when you reconnect.
+
+> **If both phones lose the app at once, there is no way back.** Nobody is
+> holding the pairing code for you. Keep the eight words written down somewhere
+> that is not either phone, and you can always rebuild.
+
+## Why there is no sign-in with a phone number
+
+It is the obvious thing to ask for, and it is the one thing this app cannot
+have.
+
+Signing in with a number means a server that stores both your numbers, an SMS
+service to verify them, and a list tying the two of you together. That list is
+the record this app exists not to create: anyone who obtains it learns exactly
+who talks to whom, how often, and since when — without reading a single message.
+Encryption does not help, because the list is not the messages.
+
+The QR code gives you the same "it just works" feeling with none of it. The
+secret goes from one screen into the other phone's camera and touches nothing
+else.
 
 ## Step 4 — Using it
 

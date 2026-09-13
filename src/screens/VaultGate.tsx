@@ -9,6 +9,7 @@ import { RELAY_EXAMPLE } from '../store/vaultStore';
 import {
   generatePairingSecret, bytesToWords, wordsToBytes, PAIRING_BYTES,
 } from '../crypto/wordlist';
+import PairScreen from './PairScreen';
 
 type Props = {
   mode: 'setup' | 'unlock';
@@ -28,11 +29,23 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [generated, setGenerated] = useState(false);
+  /** The QR sheet: showing this phone's code, or scanning the other's. */
+  const [pairing_open, setPairingOpen] = useState(false);
 
   const makePairing = () => {
     setPairing(bytesToWords(generatePairingSecret()));
     setGenerated(true);
     setErr('');
+  };
+
+  /** Open the QR screen, making a secret first if this phone has none yet. */
+  const openPairing = () => {
+    if (!wordsToBytes(pairing)) {
+      setPairing(bytesToWords(generatePairingSecret()));
+      setGenerated(true);
+    }
+    setErr('');
+    setPairingOpen(true);
   };
 
   const go = async () => {
@@ -104,6 +117,20 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
     );
   }
 
+  if (pairing_open) {
+    return (
+      <PairScreen
+        phrase={pairing}
+        onScanned={(words) => {
+          setPairing(words);
+          setGenerated(false); // scanned, not generated here
+          setPairingOpen(false);
+        }}
+        onBack={() => setPairingOpen(false)}
+      />
+    );
+  }
+
   // ---- setup ---------------------------------------------------------------
   return (
     <SafeAreaView style={s.wrap}>
@@ -121,13 +148,20 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
 
           <Text style={s.step}>1 · Pairing phrase</Text>
           <Text style={s.sub}>
-            This is what connects the two phones. Make one here, then type the same words into the
-            other phone. You only ever do this once — it is not the thing you type to get in.
+            This is what connects the two phones, and you only ever do it once. It is not the
+            thing you type to get in.
           </Text>
+
+          <TouchableOpacity style={s.qrBtn} onPress={openPairing}>
+            <Text style={s.qrBtnText}>Use a QR code</Text>
+            <Text style={s.qrBtnSub}>
+              Show one phone's code to the other. Seconds, and nothing typed.
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity style={s.suggestBtn} onPress={makePairing}>
             <Text style={s.suggestText}>
-              {generated ? 'Give me another' : 'Make one up for us'}
+              {generated ? 'Give me another' : 'Or make up words instead'}
             </Text>
           </TouchableOpacity>
 
@@ -231,6 +265,12 @@ const s = StyleSheet.create({
   },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   note: { color: T.vaultInkSoft, fontSize: 13, marginTop: 20, lineHeight: 19 },
+  qrBtn: {
+    backgroundColor: T.mine, borderRadius: 12, paddingVertical: 15, paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  qrBtnText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
+  qrBtnSub: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 4 },
   suggestBtn: {
     borderWidth: 1, borderColor: T.vaultLine, borderRadius: 12,
     paddingVertical: 13, alignItems: 'center', marginBottom: 12,

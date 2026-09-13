@@ -5,6 +5,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { T } from '../theme';
 import { DEFAULT_ICE, RELAY_EXAMPLE, type VaultSettings } from '../store/vaultStore';
+import QRCode from 'react-native-qrcode-svg';
+import { encodePairing } from '../crypto/pairingCode';
 
 type Props = {
   settings: VaultSettings;
@@ -140,11 +142,22 @@ export default function VaultSettingsScreen({
 
         <Text style={s.section}>Pairing phrase</Text>
         <Text style={s.help}>
-          The words that connect the two phones. You need these once, to set up the second phone.
-          Anyone who reads them can join this conversation, so do not leave them on screen.
+          What connects the two phones. You need it to set up the second phone — and again if
+          either phone ever reinstalls the app, since that wipes everything on it. Anyone who
+          reads this can join the conversation, so do not leave it on screen.
         </Text>
         {showPairing ? (
           <>
+            {/* The QR is here for the case that actually happens: one phone
+                reinstalls the app and has to be paired again from scratch. */}
+            <View style={s.qrCard}>
+              <QRCode
+                value={encodePairing(pairingPhrase)}
+                size={190}
+                backgroundColor="#FFFFFF"
+                color="#000000"
+              />
+            </View>
             <Text style={s.pairing}>{pairingPhrase}</Text>
             <TouchableOpacity onPress={() => setShowPairing(false)}>
               <Text style={s.link}>Hide</Text>
@@ -152,7 +165,7 @@ export default function VaultSettingsScreen({
           </>
         ) : (
           <TouchableOpacity style={s.reveal} onPress={() => setShowPairing(true)}>
-            <Text style={s.revealText}>Show the words</Text>
+            <Text style={s.revealText}>Show the code and words</Text>
           </TouchableOpacity>
         )}
 
@@ -193,6 +206,10 @@ const s = StyleSheet.create({
   },
   rowTitle: { color: T.vaultInk, fontSize: 15 },
   rowSub: { color: T.vaultInkSoft, fontSize: 12, marginTop: 3, lineHeight: 17 },
+  qrCard: {
+    backgroundColor: '#FFFFFF', padding: 14, borderRadius: 14,
+    alignSelf: 'center', marginBottom: 14,
+  },
   pairing: {
     color: T.accent, fontSize: 18, fontWeight: '600', lineHeight: 26,
     backgroundColor: T.vaultCard, borderRadius: 10, padding: 14,

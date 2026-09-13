@@ -147,4 +147,28 @@ assert.throws(() => unsealBytes(other.keys.msgKey, sealedMedia));
 ok('and cannot be opened by another vault');
 
 console.log(``);
+// ---------------------------------------------------------------------------
+// QR pairing payload. A bad decode here means two phones that cannot pair, so
+// it is worth pinning down rather than discovering with a camera in hand.
+// ---------------------------------------------------------------------------
+const { encodePairing, decodePairing } = await import('../src/crypto/pairingCode.ts');
+
+console.log('');
+console.log('QR pairing');
+const qr = encodePairing(words);
+assert.equal(decodePairing(qr), words);
+ok('a pairing phrase survives the trip through a QR code');
+
+assert.ok(!/pbhub|notes|chat/i.test(qr), 'the QR payload names the app');
+ok('the payload does not announce which app the code belongs to');
+
+for (const junk of ['', 'hello', 'nt1:', 'nt1:only-three-words', qr + '-extra', qr.slice(4)]) {
+  assert.equal(decodePairing(junk), null, `"${junk.slice(0, 20)}" should be rejected`);
+}
+ok('anything that is not one of our codes is refused, not half-read');
+
+assert.equal(hex(wordsToBytes(decodePairing(qr))), hex(secret));
+ok('and the bytes that come back out are the same secret');
+
+console.log(``);
 console.log(`${pass} checks passed`);
