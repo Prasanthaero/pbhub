@@ -95,6 +95,15 @@ export default function App() {
    * the chat says only that they are away.
    */
   const [lastSeen, setLastSeen] = useState<number | null>(null);
+  /**
+   * They are writing something.
+   *
+   * Cleared by a timer as well as by the message that says they stopped, so a
+   * partner who starts typing and then loses signal does not leave the word
+   * hanging there for the rest of the evening.
+   */
+  const [theirTyping, setTheirTyping] = useState(false);
+  const typingClear = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [relayUp, setRelayUp] = useState(false);
 
   const [myStatuses, setMyStatuses] = useState<StatusItem[]>([]);
@@ -429,6 +438,15 @@ export default function App() {
         if (!peerRef.current?.send({ k: 'ack', id: e.id })) sigRef.current?.ack(e.id);
         return;
       }
+      case 'typing': {
+        setTheirTyping(e.on);
+        if (typingClear.current) clearTimeout(typingClear.current);
+        // Six seconds is longer than the sender's own repeat, so a steady
+        // typist never flickers, and short enough that a dropped connection
+        // does not leave them typing forever.
+        if (e.on) typingClear.current = setTimeout(() => setTheirTyping(false), 6000);
+        return;
+      }
       case 'ack': {
         outboxRef.current = outboxRef.current.filter((p) => p.id !== e.id);
         persistOutbox();
@@ -482,7 +500,11 @@ export default function App() {
       case 'delete': {
         const gone = new Set(e.ids);
         setMessages((m) => {
-          const next = m.filter((x) => !gone.has(x.id));
+          // Only what they sent us. The rule is that a message can be taken
+          // back by whoever wrote it, and enforcing it here as well as at the
+          // sending end means a bug or a tampered client on their side cannot
+          // reach across and delete our own words out of our own chat.
+          const next = m.filter((x) => !(gone.has(x.id) && x.kind === 'in'));
           persistHistory(next);
           return next;
         });
@@ -670,6 +692,10 @@ export default function App() {
         if (count > 0) {
           pushSystem(`${count} message${count === 1 ? '' : 's'} arrived while you were away.`);
         }
+      },
+      onLive: (wire) => {
+        const e = unwrap(wire);
+        if (e) applyEnvelope(e);
       },
       onMailHeld: (id) => markDelivered(id, 'held'),
       onMailFull: (id) => markDelivered(id, 'failed'),
@@ -1106,6 +1132,27 @@ export default function App() {
     });
   }, [persistHistory]);
 
+  /**
+   * Tell them we are writing, at most every few seconds.
+   *
+   * Sent down the direct channel when there is one and through the relay's
+   * live path when there is not — which drops it if they are not there, since
+   * a stale typing delivered tomorrow is worse than none.
+   *
+   * Repeated rather than sent once, because the far end forgets after six
+   * seconds. That is what makes a lost stopped harmless.
+   */
+  const lastTypingSent = useRef(0);
+
+  const sendTyping = useCallback((on: boolean) => {
+    const now = Date.now();
+    if (on && now - lastTypingSent.current < 3000) return;
+    lastTypingSent.current = on ? now : 0;
+    if (peerRef.current?.send({ k: 'typing', on })) return;
+    const wire = wrap({ k: 'typing', on });
+    if (wire) sigRef.current?.live(wire);
+  }, [wrap]);
+
   const markSeen = useCallback((ids: string[]) => {
     if (!settingsRef.current.sendReadReceipts) return;
     const fresh = ids.filter((id) => !reportedSeen.current.has(id));
@@ -1133,8 +1180,21 @@ export default function App() {
    * is switched off, and pretending otherwise would be the kind of promise this
    * app should not make.
    */
+  /**
+   * Taking a message back.
+   *
+   * Only off your own phone, unless you wrote it. Reaching into someone else's
+   * phone to remove something they received is not deletion, it is editing
+   * their memory of a conversation — so 'forBoth' carries only the ids of
+   * messages this phone sent, whatever was selected. The rest go from here and
+   * stay with them, which is the honest outcome.
+   */
   const deleteMessages = useCallback((ids: string[], forBoth: boolean) => {
     const gone = new Set(ids);
+    const mine = messagesRef.current
+      .filter((m) => gone.has(m.id) && m.kind === 'out')
+      .map((m) => m.id);
+
     setMessages((m) => {
       const next = m.filter((x) => !gone.has(x.id));
       persistHistory(next);
@@ -1143,8 +1203,14 @@ export default function App() {
     // Stop re-sending anything that is being taken back.
     outboxRef.current = outboxRef.current.filter((p) => !gone.has(p.id));
     persistOutbox();
-    if (forBoth) peerRef.current?.send({ k: 'delete', ids });
-  }, [persistHistory, persistOutbox]);
+
+    if (!forBoth || !mine.length) return;
+    // Both roads, as with everything else — and held for them if they have
+    // gone, so a message taken back does not reappear when they next open it.
+    if (peerRef.current?.send({ k: 'delete', ids: mine })) return;
+    const wire = wrap({ k: 'delete', ids: mine });
+    if (wire) sigRef.current?.mail(`del-${mine[0]}`, wire);
+  }, [persistHistory, persistOutbox, wrap]);
 
   const clearChat = useCallback((forBoth: boolean) => {
     const ids = messagesRef.current.filter((m) => m.kind !== 'system').map((m) => m.id);
@@ -1320,6 +1386,8 @@ export default function App() {
           connected={connected}
           peerPresent={peerPresent}
           lastSeen={lastSeen}
+          theirTyping={theirTyping}
+          onTyping={sendTyping}
           relayUp={relayUp}
           keepHistory={settings.keepHistory}
           pairedOnce={settings.pairedOnce}

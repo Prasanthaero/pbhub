@@ -21,6 +21,8 @@ export type SignalingEvents = {
   onMail: (id: string, wire: string, at: number) => void;
   /** The backlog has been handed over; anything after this is live. */
   onMailDone: (count: number) => void;
+  /** A sealed payload worth nothing once the moment has passed. */
+  onLive: (wire: string) => void;
   /** The relay is holding this one until the partner opens the app. */
   onMailHeld: (id: string) => void;
   /** The mailbox is full — the partner has been away too long. */
@@ -108,6 +110,11 @@ export class Signaling {
           // what an envelope is, and the relay never had a chance at it.
           this.ev.onMail(String(msg.id), String(msg.d), Number(msg.at) || Date.now());
           break;
+        case 'live':
+          // Sealed like everything else; opened by the code that knows what an
+          // envelope is.
+          this.ev.onLive(String(msg.d));
+          break;
         case 'mail-done':
           this.ev.onMailDone(Number(msg.count) || 0);
           break;
@@ -161,6 +168,18 @@ export class Signaling {
     if (this.ws?.readyState !== WebSocket.OPEN) return false;
     this.ws.send(JSON.stringify({ t: 'mail', id, d: wire }));
     return true;
+  }
+
+  /**
+   * Say something that only matters this second.
+   *
+   * Forwarded to a partner who is here, dropped if they are not. Typing held
+   * in a mailbox and delivered on Tuesday is nonsense, and it would crowd out
+   * the messages that do need to wait.
+   */
+  live(wire: string) {
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify({ t: 'live', d: wire }));
   }
 
   /** Confirm receipt, so the sender can drop it from their outbox. */

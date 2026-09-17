@@ -235,6 +235,25 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    /**
+     * Something only worth saying right now: forwarded if they are here, and
+     * dropped if they are not.
+     *
+     * "Typing" held in a mailbox for two days and delivered on Tuesday is
+     * nonsense, and it would fill the queue that real messages need. This is
+     * the one thing in the protocol that is allowed to be lost.
+     */
+    if (msg.t === 'live') {
+      if (typeof msg.d !== 'string') return;
+      const room = rooms.get(ws.roomId);
+      if (!room) return;
+      reap(room);
+      const target = otherRole(ws.role);
+      const there = [...room.clients].find((c) => c.role === target && c.readyState === c.OPEN);
+      if (there) send(there, { t: 'live', d: msg.d });
+      return;
+    }
+
     if (msg.t === 'ack') {
       // Receipts travel peer to peer; the relay only forwards them.
       if (typeof msg.id !== 'string') return;

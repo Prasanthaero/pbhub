@@ -25,6 +25,10 @@ type Props = {
   peerPresent: boolean;
   /** When they were last in it, if this session saw them go. */
   lastSeen: number | null;
+  /** They are writing something right now. */
+  theirTyping: boolean;
+  /** Tell them we are, or have stopped. Throttled on the other side. */
+  onTyping: (on: boolean) => void;
   relayUp: boolean;
   keepHistory: boolean;
   /** False until a partner has actually connected at least once. */
@@ -168,7 +172,8 @@ function StatusBubble({
 }
 
 export default function Chat({
-  messages, status, connected, peerPresent, lastSeen, relayUp, keepHistory, pairedOnce,
+  messages, status, connected, peerPresent, lastSeen, theirTyping, onTyping,
+  relayUp, keepHistory, pairedOnce,
   myStatuses, theirStatuses, sending,
   onSend, onAddTextStatus, onAddStatusMedia, onRemoveStatus, onWantStatusMedia,
   onLoadMyStatusMedia, onMarkSeen, onDeleteMessages, onClearChat,
@@ -182,6 +187,14 @@ export default function Chat({
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [viewing, setViewing] = useState<Msg | null>(null);
+  /**
+   * The ••• menu.
+   *
+   * Clearing the conversation used to be a long press on this button and
+   * nothing else — a gesture nobody would ever find, for the one thing people
+   * reach for most when a chat has got long. It is a plain menu item now.
+   */
+  const [menuOpen, setMenuOpen] = useState(false);
   /** Armed in the attach sheet: the next photo is one look only. */
   const [once, setOnce] = useState(false);
 
@@ -271,6 +284,8 @@ export default function Chat({
     if (!t) return;
     onSend(t);
     setDraft('');
+    // The message itself says everything the typing signal was saying.
+    onTyping(false);
   };
 
   const startRecording = async () => {
@@ -320,16 +335,29 @@ export default function Chat({
    * reach a phone that is switched off, and implying otherwise would be the
    * kind of promise this app should not make.
    */
-  const deletePrompt = (title: string, run: (forBoth: boolean) => void) => {
+  /**
+   * Taking something back, and how far back it can go.
+   *
+   * You can always empty your own phone. Reaching into theirs is only offered
+   * for messages you wrote: removing something they received from their phone
+   * is not deleting your message, it is editing their side of a conversation.
+   * So the second button appears only when every chosen message is one of ours,
+   * and the wording says what will actually happen.
+   */
+  const deletePrompt = (
+    title: string,
+    run: (forBoth: boolean) => void,
+    canReachTheirs: boolean,
+  ) => {
     Alert.alert(
       title,
-      connected
-        ? 'Deleting on both phones only works while their app is open.'
-        : 'They are not in the app, so this can only delete it here.',
+      canReachTheirs
+        ? 'Taking it off their phone too needs their app to be open, or it happens when they next open it.'
+        : 'This can only empty your own phone. Messages they sent stay on theirs — only they can take those back.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Just here', onPress: () => run(false) },
-        ...(connected
+        ...(canReachTheirs
           ? [{ text: 'Both phones', style: 'destructive' as const, onPress: () => run(true) }]
           : []),
       ],
@@ -338,14 +366,22 @@ export default function Chat({
 
   const confirmDelete = () => {
     const ids = [...selected];
+    // Only our own can be taken off their phone as well.
+    const allMine = messages.filter((m) => selected.has(m.id)).every((m) => m.kind === 'out');
     deletePrompt(`Delete ${ids.length} message${ids.length === 1 ? '' : 's'}?`, (forBoth) => {
       onDeleteMessages(ids, forBoth);
       setSelected(new Set());
-    });
+    }, allMine);
   };
 
   const confirmClear = () =>
-    deletePrompt('Clear the whole conversation?', (forBoth) => onClearChat(forBoth));
+    deletePrompt(
+      'Clear the whole conversation?',
+      (forBoth) => onClearChat(forBoth),
+      // Clearing always empties this phone. "Both phones" is still offered,
+      // and reaches only as far as the messages we sent.
+      messages.some((m) => m.kind === 'out'),
+    );
 
   const selecting = selected.size > 0;
   /**
@@ -360,7 +396,9 @@ export default function Chat({
    * This used to key the words off the direct connection, so every time the
    * channel blinked the chat announced that the other person had left.
    */
-  const heading = peerPresent
+  const heading = theirTyping && peerPresent
+    ? 'typing…'
+    : peerPresent
     ? 'online'
     : lastSeen
       ? `last seen ${seenAt(lastSeen)}`
@@ -403,7 +441,7 @@ export default function Chat({
             <TouchableOpacity onPress={() => onCall('video')} disabled={!connected} hitSlop={8}>
               <Text style={[s.icon, !connected && s.iconOff]}>Video</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onSettings} onLongPress={confirmClear} hitSlop={8}>
+            <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={8}>
               <Text style={s.icon}>•••</Text>
             </TouchableOpacity>
           </View>
@@ -477,6 +515,13 @@ export default function Chat({
 
             const isMine = item.kind === 'out';
             const m = item.media;
+            /**
+             * One look only is a rule about what *they* get, not about what we
+             * keep. Hiding our own photo from us was wrong: it is on this phone
+             * because we took it, and blanking it protects nobody. Reported as
+             * the photo disappearing from the sender's phone too.
+             */
+            const oneLook = item.viewOnce && !isMine;
             const picked = selected.has(item.id);
 
             return (
@@ -487,9 +532,8 @@ export default function Chat({
                   if (selecting) return toggleSelect(item.id);
                   if (m?.kind === 'photo') setViewing(item);
                 }}
-                // A one-look photo must not be readable from the list itself,
-                // so it is never drawn small — only inside the viewer, once.
-                disabled={item.viewOnce && item.viewed}
+                // Spent, and there is nothing left to open.
+                disabled={oneLook && item.viewed}
                 style={[
                   s.row,
                   { justifyContent: isMine ? 'flex-end' : 'flex-start' },
@@ -497,16 +541,20 @@ export default function Chat({
                 ]}
               >
                 <View style={[s.bubble, isMine ? s.mine : s.theirs, m ? s.bubbleMedia : null]}>
-                  {item.viewOnce && item.viewed && (
+                  {oneLook && item.viewed && (
                     <Text style={s.burnt}>Opened · the photo is gone</Text>
                   )}
-                  {item.viewOnce && !item.viewed && !!m && (
-                    <Text style={s.burnt}>
-                      {isMine ? 'Photo · one look only' : 'Photo · tap to open, once'}
-                    </Text>
+                  {oneLook && !item.viewed && !!m && (
+                    <Text style={s.burnt}>Photo · tap to open, once</Text>
                   )}
-                  {m?.kind === 'photo' && !item.viewOnce && (
+                  {m?.kind === 'photo' && !oneLook && (
                     <Image source={{ uri: m.uri }} style={s.media} resizeMode="cover" />
+                  )}
+                  {/* Our own one-look photo stays ours: it is on this phone
+                      because we put it there, and hiding it from the person who
+                      took it protects nobody. The note says what they will get. */}
+                  {item.viewOnce && isMine && (
+                    <Text style={s.onceNote}>One look only, for them</Text>
                   )}
                   {m?.kind === 'video' && <VideoBubble uri={m.uri} />}
                   {m?.kind === 'audio' && (
@@ -563,9 +611,14 @@ export default function Chat({
             <TextInput
               style={s.input}
               value={draft}
-              onChangeText={setDraft}
+              onChangeText={(t) => {
+                setDraft(t);
+                // Keystrokes, not focus: opening the keyboard and thinking
+                // better of it should not announce anything.
+                onTyping(t.length > 0);
+              }}
               onFocus={() => setTyping(true)}
-              onBlur={() => setTyping(false)}
+              onBlur={() => { setTyping(false); onTyping(false); }}
               placeholder={
                 connected || relayUp ? 'Message' : 'No connection yet'
               }
@@ -704,6 +757,38 @@ export default function Chat({
         </View>
       </Modal>
 
+      {/* ---- the ••• menu ---- */}
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <TouchableOpacity style={s.sheetBg} activeOpacity={1} onPress={() => setMenuOpen(false)}>
+          <View style={s.sheet}>
+            <TouchableOpacity
+              style={s.sheetItem}
+              onPress={() => { setMenuOpen(false); confirmClear(); }}
+            >
+              <Text style={[s.sheetItemText, { color: T.danger }]}>Clear this chat</Text>
+              <Text style={s.sheetItemSub}>
+                Empties the conversation. You choose whether it goes from their phone too.
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={s.sheetItem}
+              onPress={() => { setMenuOpen(false); onSettings(); }}
+            >
+              <Text style={s.sheetItemText}>Settings</Text>
+              <Text style={s.sheetItemSub}>
+                Disappearing messages, read receipts, the pairing code.
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* ---- attachment sheet ---- */}
       <Modal
         visible={attachOpen}
@@ -766,7 +851,7 @@ export default function Chat({
           onPress={() => {
             const shown = viewing;
             setViewing(null);
-            if (shown?.viewOnce && !shown.viewed) onBurn(shown.id);
+            if (shown?.viewOnce && shown.kind === 'in' && !shown.viewed) onBurn(shown.id);
           }}
         >
           <View style={s.viewerBody}>
@@ -801,6 +886,13 @@ const s = StyleSheet.create({
   onceTick: { color: '#fff', fontSize: 14, fontWeight: '700' },
   onceTitle: { color: T.vaultInk, fontSize: 15, fontWeight: '600' },
   onceSub: { color: T.vaultInkSoft, fontSize: 12, marginTop: 2, lineHeight: 17 },
+  sheetItemSub: {
+    color: T.vaultInkSoft, fontSize: 12.5, marginTop: 3, lineHeight: 17,
+  },
+  onceNote: {
+    color: 'rgba(255,255,255,0.75)', fontSize: 11.5,
+    paddingHorizontal: 14, paddingTop: 6,
+  },
   burnt: {
     color: T.vaultInkSoft, fontSize: 13.5, fontStyle: 'italic',
     paddingHorizontal: 14, paddingVertical: 12,

@@ -39,8 +39,17 @@ export const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
 export const MAX_OFFLINE_MEDIA_BYTES = 4 * 1024 * 1024;
 
 export type Envelope =
-  | { k: 'msg'; id: string; body: string; at: number; /** Absolute ms when both phones drop it. */ exp?: number }
+  | {
+      k: 'msg';
+      id: string;
+      body: string;
+      at: number;
+      /** Absolute ms when both phones drop it. */
+      exp?: number;
+    }
   | { k: 'ack'; id: string }
+  /** Someone is writing. Never held for later — see Signaling.live. */
+  | { k: 'typing'; on: boolean }
   /** "I have these on screen." Sent only when the chat is actually open, and
    *  only if read receipts are switched on. */
   | { k: 'read'; ids: string[] }
