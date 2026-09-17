@@ -23,8 +23,9 @@ closes on its own.
   no database, no file, no cache. Closing the app empties it on both phones.
 - **No accounts.** No phone number, no email, no username, no server-side record
   that either of you exists.
-- **One shared phrase** is the whole secret. Both of you type the same phrase and
-  you are connected. (You also both point at the same relay — see setup.)
+- **One shared code** is the whole secret. One phone makes it, the other scans or
+  types it, and you are connected. (You also both point at the same relay — see
+  setup.)
 
 ## How the two of you get set up
 
@@ -35,16 +36,20 @@ Do this once, together, on both phones.
    and costs nothing. You will end up with an address like
    `wss://something.onrender.com`.
 2. Install the app on both phones.
-3. **Long-press the word "Notes"** at the top of the screen for about a second
-   and a half. This is the only way in before a vault exists.
-4. On the first phone, tap **"Make one up for us"**. You get eight words:
+3. **Hold the + button** on the notes list for about a second and a half. This is
+   the way in, before a vault exists and after.
+4. On the first phone, tap **"Make or scan a QR code"** and hold the code up to
+   the other phone's camera. That is the whole of it — nothing typed, and the
+   secret never touches a network.
 
-   > chair chin ash bread block book mask jelly
+   If a camera will not cooperate, **"Or use a number instead"** gives you the
+   same secret as twenty digits:
 
-   Write them down. Type the *same words* into the second phone. This happens
-   **once** and is not what you type to get in — you can forget it afterwards.
-   (If you lose them, they are in Settings → Pairing phrase on a phone that is
-   already set up.)
+   > 20112 44368 63978 00002
+
+   Type those into the other phone. This happens **once** and is not what you
+   type to get in — you can forget it afterwards. (If you lose it, it is in
+   Settings → Pairing code on a phone that is already set up.)
 5. Choose a **PIN** on each phone. This is what opens the chat. It stays on that
    phone, so the two phones do not have to match, and it can be short —
    `110490` is fine.
@@ -75,11 +80,25 @@ That is what stands between someone holding your phone and an unlimited number
 of guesses. A `1234`-grade PIN is still a `1234`-grade PIN; this only makes
 guessing it slow.
 
-PB is in the chat as well, bottom right. Tap him. Hold him to send him away
-until next time.
+### PB in the chat
+
+He sits bottom right, above the message box, and gets out of the way while the
+keyboard is up.
+
+- **Tap him** and he says something and throws hearts.
+- **Hold him** and a small tray of emoji opens.
+  - **Tap one** and it goes to the other phone as a message.
+  - **Hold one** and PB wears that mood for a couple of minutes — hold the moon
+    and he falls asleep, hold the heart and his eyes go pink. That one stays on
+    this phone; it is about him, not about them.
+- **hide PB**, in the corner of the tray, puts him away until you next open the
+  chat.
+
+He also notices when the other one starts typing, a second or two before
+anything appears.
 
 > **Nobody can recover any of this.** Not you, not us, not the relay. There is
-> no reset. If you both forget your PINs and lose the pairing words, the vault is
+> no reset. If you both forget your PINs and lose the pairing code, the vault is
 > gone and you set up a new one.
 
 ## Using it
@@ -191,15 +210,16 @@ So the salt is a constant, and the consequence is real: someone could precompute
 a dictionary once and try it against every user of this app, instead of paying
 that cost per person.
 
-**The entire defence is the strength of your phrase**, which is why setup offers
-to make one for you. Tap "Make one up for us" and you get seven words drawn
-byte-by-byte from the system random generator over a 256-word list — 56 bits,
-with no human choice anywhere in it:
+**The entire defence is the strength of the pairing secret**, which is why you
+never choose it. It is eight bytes straight from the system random generator —
+64 bits, with no human choice anywhere in it — and it reaches the other phone as
+a QR code or as the twenty digits that spell those same bytes out:
 
-> box earth elder ginger bed hill bike
+> 20112 44368 63978 00002
 
-Seven random words are far past what any precomputation can reach. `iloveyou2`
-is not, with or without a salt. Use the generator.
+Nothing about that is guessable or precomputable. `iloveyou2` would be, with or
+without a salt, which is why there is no box anywhere in this app that lets you
+pick the secret yourself.
 
 ### Why the round count looks low
 

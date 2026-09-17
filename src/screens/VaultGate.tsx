@@ -8,8 +8,9 @@ import { T } from '../theme';
 import { inExpoGo } from '../env';
 import { DEFAULT_RELAY } from '../store/vaultStore';
 import {
-  generatePairingSecret, bytesToWords, wordsToBytes, PAIRING_BYTES,
+  generatePairingSecret, bytesToWords, wordsToBytes,
 } from '../crypto/wordlist';
+import { bytesToDigits, parsePairing, PAIRING_DIGITS } from '../crypto/pairingNumber';
 import PairScreen from './PairScreen';
 import PBBot, { type PBMood } from '../ui/PBBot';
 import {
@@ -29,7 +30,14 @@ const DEFAULT_PIN = '110490';
 export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) {
   const [pin, setPin] = useState(mode === 'setup' ? DEFAULT_PIN : '');
   const [pin2, setPin2] = useState(mode === 'setup' ? DEFAULT_PIN : '');
+  /**
+   * The secret, as words, which is what the QR code and this app have always
+   * carried internally. Nobody sees it in this form any more — what is shown
+   * and typed is the number below.
+   */
   const [pairing, setPairing] = useState('');
+  /** What is actually in the box, digits and all. */
+  const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [generated, setGenerated] = useState(false);
@@ -87,9 +95,16 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
 
   const makePairing = () => {
     setPairing(bytesToWords(generatePairingSecret()));
+    setTyped('');
     setGenerated(true);
     setErr('');
   };
+
+  /** The generated secret as the number the other phone has to be given. */
+  const shownNumber = (() => {
+    const bytes = wordsToBytes(pairing);
+    return bytes ? bytesToDigits(bytes) : '';
+  })();
 
   /** Open the QR screen, making a secret first if this phone has none yet. */
   const openPairing = () => {
@@ -162,8 +177,8 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
     const secret = wordsToBytes(pairing);
     if (!secret) {
       return setErr(
-        pairing.trim()
-          ? 'That code is not right — check it against the other phone.'
+        typed.trim()
+          ? 'That number is not right — check it against the other phone.'
           : 'Make a code on one phone and scan it with the other.',
       );
     }
@@ -242,6 +257,10 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
         phrase={pairing}
         onScanned={(words) => {
           setPairing(words);
+          // Show the scanned secret as its number, so both phones can be held
+          // side by side and checked against each other.
+          const bytes = wordsToBytes(words);
+          setTyped(bytes ? bytesToDigits(bytes) : '');
           setGenerated(false); // scanned, not generated here
           setPairingOpen(false);
         }}
@@ -283,25 +302,33 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
 
           <TouchableOpacity style={s.suggestBtn} onPress={makePairing}>
             <Text style={s.suggestText}>
-              {generated ? 'Give me another code' : 'Or use words instead of a code'}
+              {generated ? 'Give me another number' : 'Or use a number instead'}
             </Text>
           </TouchableOpacity>
 
-          {generated && !!pairing && (
+          {generated && !!shownNumber && (
             <View style={s.suggestBox}>
-              <Text style={s.suggestPhrase}>{pairing}</Text>
-              <Text style={s.suggestNote}>Type these into the other phone.</Text>
+              <Text style={s.suggestPhrase}>{shownNumber}</Text>
+              <Text style={s.suggestNote}>Type this into the other phone.</Text>
             </View>
           )}
 
           <TextInput
-            style={[s.input, generated && s.inputMuted]}
-            value={pairing}
-            onChangeText={(t) => { setPairing(t); setGenerated(false); }}
+            style={s.input}
+            value={typed}
+            onChangeText={(t) => {
+              setTyped(t);
+              setGenerated(false);
+              // Kept as words behind the glass: that is what the QR code
+              // carries, so both roads end at the same string.
+              const bytes = parsePairing(t);
+              setPairing(bytes ? bytesToWords(bytes) : '');
+              if (err) setErr('');
+            }}
             autoCapitalize="none"
             autoCorrect={false}
-            multiline
-            placeholder={`or type the ${PAIRING_BYTES} words from the other phone`}
+            keyboardType="number-pad"
+            placeholder={`or type the ${PAIRING_DIGITS} numbers from the other phone`}
             placeholderTextColor={T.vaultInkSoft}
           />
 

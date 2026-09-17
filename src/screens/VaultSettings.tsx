@@ -8,6 +8,8 @@ import { T } from '../theme';
 import { DEFAULT_ICE, RELAY_EXAMPLE, type VaultSettings } from '../store/vaultStore';
 import QRCode from 'react-native-qrcode-svg';
 import { encodePairing } from '../crypto/pairingCode';
+import { wordsToBytes } from '../crypto/wordlist';
+import { bytesToDigits } from '../crypto/pairingNumber';
 import { TTL_CHOICES, IDLE_CHOICES } from '../store/messages';
 
 type Props = {
@@ -25,6 +27,9 @@ export default function VaultSettingsScreen({
   settings, roomId, pairingPhrase, onSave, onChangePin, onDestroy, onBack,
 }: Props) {
   const [showPairing, setShowPairing] = useState(false);
+  /** The secret is words inside the app; it is a number everywhere it is seen. */
+  const pairingBytes = wordsToBytes(pairingPhrase);
+  const pairingNumber = pairingBytes ? bytesToDigits(pairingBytes) : pairingPhrase;
   const [pinOpen, setPinOpen] = useState(false);
   const [newPin, setNewPin] = useState('');
   const [newPin2, setNewPin2] = useState('');
@@ -86,7 +91,7 @@ export default function VaultSettingsScreen({
    *
    * Destroying erases this phone's copy — the vault, the PIN, the statuses, the
    * chat. It does not destroy the conversation: the room comes from the pairing
-   * words, so anyone holding those can set up again and land in the same place.
+   * code, so anyone holding that can set up again and land in the same place.
    * Saying so here is the difference between a reversible mistake and a lost
    * conversation.
    */
@@ -94,12 +99,12 @@ export default function VaultSettingsScreen({
     Alert.alert(
       'Destroy the vault on this phone?',
       'This erases the PIN, the statuses and the chat. Afterwards this is only a notes app.\n\n'
-      + 'You can come back by setting up again with the same pairing words — they are on the '
-      + 'other phone, and wherever you wrote them down. Without them, nobody can get back in, '
+      + 'You can come back by setting up again with the same pairing code — it is on the '
+      + 'other phone, and wherever you wrote it down. Without it, nobody can get back in, '
       + 'including you.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Show me the words first', onPress: () => setShowPairing(true) },
+        { text: 'Show me the code first', onPress: () => setShowPairing(true) },
         { text: 'Destroy', style: 'destructive', onPress: onDestroy },
       ],
     );
@@ -254,7 +259,7 @@ export default function VaultSettingsScreen({
         )}
         {!!pinMsg && <Text style={s.pinMsg}>{pinMsg}</Text>}
 
-        <Text style={s.section}>Pairing phrase</Text>
+        <Text style={s.section}>Pairing code</Text>
         <Text style={s.help}>
           What connects the two phones. Needed again if either one reinstalls. Anyone who reads
           it can join — do not leave it on screen.
@@ -271,14 +276,14 @@ export default function VaultSettingsScreen({
                 color="#000000"
               />
             </View>
-            <Text style={s.pairing}>{pairingPhrase}</Text>
+            <Text style={s.pairing}>{pairingNumber}</Text>
             <TouchableOpacity onPress={() => setShowPairing(false)}>
               <Text style={s.link}>Hide</Text>
             </TouchableOpacity>
           </>
         ) : (
           <TouchableOpacity style={s.reveal} onPress={() => setShowPairing(true)}>
-            <Text style={s.revealText}>Show the code and words</Text>
+            <Text style={s.revealText}>Show the code and number</Text>
           </TouchableOpacity>
         )}
 

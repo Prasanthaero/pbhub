@@ -13,7 +13,7 @@ import {
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { T } from '../theme';
 import type { Msg } from '../store/messages';
-import PBBot, { PB_LINES, type PBMood } from '../ui/PBBot';
+import PBBot, { PB_LINES, PB_EMOJI, type PBMood } from '../ui/PBBot';
 import {
   STATUS_MAX_CHARS, STATUS_VIDEO_SECONDS, timeLeft, isLiveItem, type StatusItem,
 } from '../store/status';
@@ -71,6 +71,9 @@ type Props = {
  * and the navigation bar are.
  */
 const BREATHING_ROOM = 40;
+
+/** How long a mood put on PB from the tray stays on him. */
+const PB_WEAR_MS = 2 * 60 * 1000;
 
 /**
  * "last seen 12:30 AM", with the day added once it is no longer today.
@@ -205,8 +208,19 @@ export default function Chat({
   const [pbSay, setPbSay] = useState('');
   const [pbBeat, setPbBeat] = useState(0);
   const [pbGone, setPbGone] = useState(false);
+  /** The emoji tray, opened by holding him down. */
+  const [pbTray, setPbTray] = useState(false);
   const pbTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pbLast = useRef(-1);
+  /**
+   * The mood he is wearing, if any.
+   *
+   * Holding an emoji puts him in it for a while. Everything else he does —
+   * a poke, noticing the other one typing — is a moment long and has to hand
+   * him back to whatever he was wearing, not to plain idle.
+   */
+  const pbWorn = useRef<PBMood>('idle');
+  const pbWearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** How far the message box has to rise to clear the keyboard. */
   const { inset, onLayout } = useKeyboardInset();
@@ -386,20 +400,53 @@ export default function Chat({
 
   const selecting = selected.size > 0;
 
+  /** Say something for a moment, then go back to whatever he is wearing. */
+  const pbMoment = (line: string, mood: PBMood) => {
+    setPbSay(line);
+    setPbMood(mood);
+    setPbBeat((b) => b + 1);
+    if (pbTimer.current) clearTimeout(pbTimer.current);
+    pbTimer.current = setTimeout(() => {
+      setPbSay('');
+      setPbMood(pbWorn.current);
+    }, 2600);
+  };
+
   /** A poke: he says one thing, throws a few hearts, and settles down again. */
   const pokePB = () => {
     let i = Math.floor(Math.random() * PB_LINES.length);
     if (i === pbLast.current) i = (i + 1) % PB_LINES.length;
     pbLast.current = i;
-    setPbSay(PB_LINES[i]);
-    setPbMood(Math.random() < 0.4 ? 'happy' : 'love');
-    setPbBeat((b) => b + 1);
-    if (pbTimer.current) clearTimeout(pbTimer.current);
-    pbTimer.current = setTimeout(() => { setPbSay(''); setPbMood('idle'); }, 2600);
+    pbMoment(PB_LINES[i], Math.random() < 0.4 ? 'happy' : 'love');
+  };
+
+  /** Tap in the tray: the emoji goes to the other phone as a message. */
+  const sendEmoji = (e: string) => {
+    setPbTray(false);
+    onSend(e);
+    pbMoment('sent', 'happy');
+  };
+
+  /**
+   * Hold in the tray: PB puts that mood on for a couple of minutes.
+   *
+   * Not sent anywhere — this one is only about him. It wears off on its own, so
+   * there is nothing to undo and no setting for it.
+   */
+  const wearEmoji = (item: { e: string; mood: PBMood; line: string }) => {
+    setPbTray(false);
+    pbWorn.current = item.mood;
+    pbMoment(item.line, item.mood);
+    if (pbWearTimer.current) clearTimeout(pbWearTimer.current);
+    pbWearTimer.current = setTimeout(() => {
+      pbWorn.current = 'idle';
+      setPbMood('idle');
+    }, PB_WEAR_MS);
   };
 
   /** Held down by mistake is the usual reason, so this asks first. */
   const hidePB = () => {
+    setPbTray(false);
     Alert.alert(
       'Send PB away?',
       'He comes back the next time you open the chat.',
@@ -418,14 +465,14 @@ export default function Chat({
   // two before anything appears.
   useEffect(() => {
     if (!theirTyping || pbGone) return;
-    setPbMood('happy');
-    setPbSay('they are writing');
-    setPbBeat((b) => b + 1);
-    if (pbTimer.current) clearTimeout(pbTimer.current);
-    pbTimer.current = setTimeout(() => { setPbSay(''); setPbMood('idle'); }, 2600);
+    pbMoment('they are writing', 'happy');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [theirTyping, pbGone]);
 
-  useEffect(() => () => { if (pbTimer.current) clearTimeout(pbTimer.current); }, []);
+  useEffect(() => () => {
+    if (pbTimer.current) clearTimeout(pbTimer.current);
+    if (pbWearTimer.current) clearTimeout(pbWearTimer.current);
+  }, []);
   /**
    * What the line at the top says, and what colour the dot is.
    *
@@ -644,6 +691,39 @@ export default function Chat({
           }}
         />
 
+        {/* A tap anywhere else puts the tray away, the way a menu should. */}
+        {pbTray && (
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setPbTray(false)}
+          />
+        )}
+
+        {pbTray && !pbGone && (
+          <View style={s.tray}>
+            <View style={s.trayRow}>
+              {PB_EMOJI.map((item) => (
+                <TouchableOpacity
+                  key={item.e}
+                  onPress={() => sendEmoji(item.e)}
+                  onLongPress={() => wearEmoji(item)}
+                  delayLongPress={350}
+                  hitSlop={4}
+                >
+                  <Text style={s.trayEmoji}>{item.e}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={s.trayFoot}>
+              <Text style={s.trayHint}>Tap to send · hold to put it on PB</Text>
+              <TouchableOpacity onPress={hidePB} hitSlop={10}>
+                <Text style={s.trayHide}>hide PB</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* PB, off duty. He sits out of the way of the last message and is
             gone while the keyboard is up, where there is no room for him. */}
         {!pbGone && !typing && !selecting && (
@@ -652,9 +732,9 @@ export default function Chat({
               mood={pbMood}
               beat={pbBeat}
               size={54}
-              say={pbSay}
+              say={pbTray ? '' : pbSay}
               onPress={pokePB}
-              onLongPress={hidePB}
+              onLongPress={() => setPbTray(true)}
               // Both he and his bubble hang off the right edge. Centred, which
               // is what the door screen wants, he would hop sideways every time
               // a bubble appeared and take the eye with him.
@@ -1027,6 +1107,23 @@ const s = StyleSheet.create({
   // Above the message box, hard against the right edge, where he covers the
   // corner of a bubble at worst and never the text.
   pet: { position: 'absolute', right: 8, bottom: 120, alignItems: 'flex-end' },
+
+  // Sits above him, hanging off the same edge.
+  tray: {
+    position: 'absolute', right: 8, bottom: 196, maxWidth: 330,
+    backgroundColor: T.vaultCard, borderRadius: 20,
+    borderWidth: 1, borderColor: T.vaultLine,
+    paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8,
+  },
+  trayRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 },
+  trayEmoji: { fontSize: 27, paddingHorizontal: 6, paddingVertical: 4 },
+  trayFoot: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: 12, marginTop: 8, paddingTop: 8,
+    borderTopWidth: 1, borderTopColor: T.vaultLine,
+  },
+  trayHint: { color: T.vaultInkSoft, fontSize: 11.5 },
+  trayHide: { color: T.vaultInkSoft, fontSize: 11.5, fontWeight: '700' },
 
   composer: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 8,

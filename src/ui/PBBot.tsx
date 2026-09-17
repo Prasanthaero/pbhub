@@ -61,6 +61,24 @@ export const PB_LINES = [
   'no strangers today',
 ];
 
+/**
+ * What is in the tray when PB is held down.
+ *
+ * Tapping one sends it to the other phone. Holding one puts PB in that mood for
+ * a while — he is the one wearing the feeling, so the list is short and every
+ * entry maps onto a face he actually has.
+ */
+export const PB_EMOJI: { e: string; mood: PBMood; line: string }[] = [
+  { e: '❤️', mood: 'love', line: 'all hearts now' },
+  { e: '😘', mood: 'love', line: 'kisses' },
+  { e: '😂', mood: 'happy', line: 'ha!' },
+  { e: '👍', mood: 'happy', line: 'ok ok' },
+  { e: '🔥', mood: 'happy', line: 'on fire' },
+  { e: '🥺', mood: 'sad', line: 'aw' },
+  { e: '😴', mood: 'sleepy', line: 'sleepy' },
+  { e: '🌙', mood: 'sleepy', line: 'good night' },
+];
+
 /** A heart made of two circles and a turned square. */
 function Heart({ w, color }: { w: number; color: string }) {
   return (

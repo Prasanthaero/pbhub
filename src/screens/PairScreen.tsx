@@ -6,7 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import QRCode from 'react-native-qrcode-svg';
 import { T } from '../theme';
-import { PAIRING_BYTES } from '../crypto/wordlist';
+import { wordsToBytes } from '../crypto/wordlist';
+import { bytesToDigits, PAIRING_DIGITS } from '../crypto/pairingNumber';
 import { encodePairing, decodePairing } from '../crypto/pairingCode';
 
 /**
@@ -38,6 +39,10 @@ export default function PairScreen({ phrase, onScanned, onBack }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const [handled, setHandled] = useState(false);
   const [err, setErr] = useState('');
+
+  /** The same secret written out, for the phone whose camera will not focus. */
+  const bytes = wordsToBytes(phrase);
+  const shownNumber = bytes ? bytesToDigits(bytes) : '';
 
   const startScan = async () => {
     setErr('');
@@ -100,10 +105,10 @@ export default function PairScreen({ phrase, onScanned, onBack }: Props) {
 
           {!!err && <Text style={s.err}>{err}</Text>}
 
-          <Text style={s.words}>{phrase}</Text>
+          <Text style={s.words}>{shownNumber}</Text>
           <Text style={s.note}>
-            If a camera will not cooperate, these {PAIRING_BYTES} words are the same secret — type
-            them into the other phone by hand.
+            If a camera will not cooperate, these {PAIRING_DIGITS} numbers are the same secret —
+            type them into the other phone by hand.
           </Text>
 
           <Text style={s.why}>
@@ -153,8 +158,8 @@ const s = StyleSheet.create({
   },
   primaryText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
   words: {
-    color: T.accent, fontSize: 16, fontWeight: '600', lineHeight: 24,
-    textAlign: 'center', marginTop: 28, paddingHorizontal: 8,
+    color: T.accent, fontSize: 20, fontWeight: '700', lineHeight: 28,
+    letterSpacing: 1.5, textAlign: 'center', marginTop: 28, paddingHorizontal: 8,
   },
   note: {
     color: T.vaultInkSoft, fontSize: 12.5, lineHeight: 18, marginTop: 10, textAlign: 'center',

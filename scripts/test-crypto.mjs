@@ -173,6 +173,47 @@ assert.equal(hex(wordsToBytes(decodePairing(qr))), hex(secret));
 ok('and the bytes that come back out are the same secret');
 
 // ---------------------------------------------------------------------------
+// The number people are shown and type. A format that loses a bit here pairs
+// the two phones into different rooms, which looks exactly like a working
+// setup until nothing ever arrives.
+// ---------------------------------------------------------------------------
+const { bytesToDigits, digitsToBytes, parsePairing, PAIRING_DIGITS } =
+  await import('../src/crypto/pairingNumber.ts');
+
+console.log('');
+console.log('the pairing number');
+
+for (let i = 0; i < 400; i++) {
+  const s = generatePairingSecret();
+  const shown = bytesToDigits(s);
+  assert.equal(shown.replace(/\D/g, '').length, PAIRING_DIGITS);
+  assert.equal(hex(digitsToBytes(shown)), hex(s), 'round trip failed for ' + shown);
+}
+ok(`every secret is exactly ${PAIRING_DIGITS} digits, and reads back byte for byte`);
+
+// The two ends of the range are where an off-by-one in the padding shows up.
+assert.equal(bytesToDigits(new Uint8Array(8)), '00000 00000 00000 00000');
+assert.equal(bytesToDigits(new Uint8Array(8).fill(255)), '65535 65535 65535 65535');
+ok('all zeroes and all ones are still the right length');
+
+const digits = bytesToDigits(secret);
+assert.equal(hex(digitsToBytes(digits.replace(/ /g, ''))), hex(secret));
+assert.equal(hex(digitsToBytes(digits.replace(/ /g, '-'))), hex(secret));
+assert.equal(hex(digitsToBytes(' ' + digits + '\n')), hex(secret));
+ok('spaces, dashes and stray whitespace between the groups are ignored');
+
+for (const junk of ['', '123', digits + '7', digits.slice(1), '99999 99999 99999 99999', 'hello']) {
+  assert.equal(digitsToBytes(junk), null, `"${junk}" should be rejected`);
+}
+ok('a wrong length, or a group no secret could produce, is refused');
+
+// Somebody wrote their words on paper before the app started showing numbers.
+assert.equal(hex(parsePairing(digits)), hex(secret));
+assert.equal(hex(parsePairing(words)), hex(secret));
+assert.equal(parsePairing('not a pairing code at all'), null);
+ok('both the number and an older written-down phrase are accepted');
+
+// ---------------------------------------------------------------------------
 // Changing how hard the PIN is to stretch must not strand anybody. A vault made
 // before the round count was written down has to keep opening, and be quietly
 // upgraded on the way past.
