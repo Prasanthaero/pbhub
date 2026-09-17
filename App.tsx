@@ -333,7 +333,6 @@ export default function App() {
   const startPeek = useCallback((roomId: string, cfg: VaultSettings) => {
     peekRef.current?.close();
     peekRef.current = null;
-    console.log('[peek] start?', cfg.quietNotifications, !!cfg.relayUrl);
     if (!cfg.quietNotifications || !cfg.relayUrl) return;
 
     const deaf = new Signaling(cfg.relayUrl, roomId, new Uint8Array(32), {
@@ -342,13 +341,14 @@ export default function App() {
       onSignal: () => {},
       onStatus: () => {},
       onClosed: () => {},
+      // Never sent to a listener; the relay holds the mail until it is asked.
       onMail: () => {},
       onMailDone: () => {},
       onMailHeld: () => {},
       onMailFull: () => {},
       onAck: () => {},
       onLive: () => {},
-      onWaiting: () => { console.log('[peek] waiting -> dot'); showDot(); },
+      onWaiting: () => { showDot(); },
     }, cfg.deviceId, true);
     peekRef.current = deaf;
     deaf.connect();
