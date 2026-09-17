@@ -6,17 +6,18 @@ On the home screen it is called **Notes**, it has a notepad icon, and if you
 open it you get a working notes app with groceries and a wifi password in it.
 There is no second tab, no login screen, and nothing that says "chat".
 
-Open a new note, type your PIN as the only line in it, and press **Done**.
-The note is never saved, and the chat opens instead.
+Hold down the **+** button and type your PIN. Three wrong ones and the door
+closes on its own.
 
 ---
 
 ## What it does
 
 - **Two people only.** Not a group app. The room holds two devices and refuses a third.
-- **Live only.** No notifications and no offline delivery — you are both in the
-  app, or there is no conversation. See [below](#you-both-have-to-be-in-the-app-at-the-same-time)
-  for why that is the design and not an oversight.
+- **Either of you can be away.** A message or a photo sent to a phone that is not
+  there waits at the relay, encrypted, until it is collected — then it is dropped.
+  What there is no such thing as here is a push notification. See
+  [below](#one-of-you-can-be-away-neither-of-you-gets-pinged).
 - **Text, voice and video**, all peer-to-peer over WebRTC.
 - **Nothing is stored.** Messages live in a JavaScript array and nowhere else —
   no database, no file, no cache. Closing the app empties it on both phones.
@@ -44,28 +45,38 @@ Do this once, together, on both phones.
    **once** and is not what you type to get in — you can forget it afterwards.
    (If you lose them, they are in Settings → Pairing phrase on a phone that is
    already set up.)
-5. Choose a **PIN** on each phone. This is what you type into a note to open the
-   chat. It stays on that phone, so the two phones do not have to match, and it
-   can be short — `110490` is fine.
+5. Choose a **PIN** on each phone. This is what opens the chat. It stays on that
+   phone, so the two phones do not have to match, and it can be short —
+   `110490` is fine.
 6. Enter the same relay address on both.
 7. Both phones show a short code in Settings (`•••`). **Check they match.**
 
-After that, the way back in is the note trick: new note → type your PIN → Done.
+After that, the way back in is to **hold down the + button** on the notes list.
+Nobody presses it for a second and a half by accident, and holding the word
+**Notes** at the top does the same thing.
 
-It has to be a **new** note, with **no title**, and the PIN as **one word on one
-line**. That is how the app knows to even try — and it is why writing an actual
-grocery list does not pause for two seconds every time you save it.
+### Three tries, and PB shuts the door
 
-**A wrong PIN is never written down.** Get it wrong and nothing is saved and
-nothing is said; you are simply back at your notes. An earlier version saved the
-attempt as an ordinary note, on the theory that this was good deniability. It
-was the opposite: mistype your PIN once and it sat in the notes list in plain
-text, one character from the real one, for anyone who picked up the phone.
+**PB** is the small character on the door screen. He is there because a PIN box
+that says "wrong" in red tells you nothing about how much trouble you are in,
+and because this app is meant to be liked as well as trusted.
 
-The cost is that a genuine one-word note needs a title or a second word to be
-kept. The editor says so while you are typing one.
+- Wrong PIN: he looks miserable and one of the three dots under him turns red.
+- Three wrong: he closes his eyes, and the app puts you back in the notes. There
+  is nothing on that screen to suggest there was ever another way in.
+- Try again straight away and you cannot: the first wait is **20 seconds**, the
+  next **a minute**, and after that **five minutes**, every time it happens.
 
-The long-press still works too, as a fallback.
+The count is written to storage, so closing the app, force-stopping it or
+rebooting the phone does not hand the tries back. The right PIN clears all of
+it — the count and the wait — the moment it works.
+
+That is what stands between someone holding your phone and an unlimited number
+of guesses. A `1234`-grade PIN is still a `1234`-grade PIN; this only makes
+guessing it slow.
+
+PB is in the chat as well, bottom right. Tap him. Hold him to send him away
+until next time.
 
 > **Nobody can recover any of this.** Not you, not us, not the relay. There is
 > no reset. If you both forget your PINs and lose the pairing words, the vault is
@@ -75,7 +86,7 @@ The long-press still works too, as a fallback.
 
 | | |
 |---|---|
-| Open the chat | New note → type your PIN as the only line → **Done** |
+| Open the chat | Hold the **+** button → type your PIN → **Open** |
 | Close it fast | **Close** in the top-left, or just switch apps |
 | Voice call | **Call** |
 | Video call | **Video** |
@@ -84,31 +95,30 @@ The long-press still works too, as a fallback.
 Switching to another app wipes the conversation and locks the vault. That is on
 by default; you can turn it off in Settings if it gets annoying.
 
-Screenshots are blocked while the chat is open, and the app shows blank in the
-recent-apps switcher.
+Screenshots are allowed by default and can be blocked in Settings. Blocking them
+stops your own phone taking one; it cannot stop the other person pointing a
+second camera at their screen, and no app can.
 
-### You both have to be in the app at the same time
+### One of you can be away. Neither of you gets pinged.
 
-This is the one thing that will annoy you, and it is a direct consequence of
-everything above, so it is worth understanding rather than reporting as a bug.
+A message sent to a phone that is not in the app is sealed and left at the relay.
+It is ciphertext there — the relay cannot read it, it holds nothing else about
+either of you, and it drops each item the moment the other phone collects it. A
+locked phone is told that *something* arrived and is handed none of it until it
+is unlocked. Photos and clips travel the same road, with a smaller size limit,
+because they have to sit in memory until they are picked up.
 
-There are **no notifications**. Nothing rings, nothing buzzes, and a message sent
-while the other person is out of the app does not arrive later — it is not stored
-anywhere to arrive *from*.
+What does not exist is a **push notification**. Nothing rings and nothing buzzes.
 
-Delivering a message to a closed app requires a push notification. Push means
-Google's servers, a device token that identifies the phone, and a permanent
-registration tying this app to you — the precise things this app exists to avoid.
-Holding the connection open in the background instead would need a foreground
-service, which Android displays as a permanent notification, which rather
-undermines a notes app.
+A red dot appears in the status bar if the app is still alive in the background
+when something lands, and that is as far as it goes: Android suspends the app
+after a few minutes, and after that nothing arrives to put a dot on. Making it
+reliable means either Google's push servers holding a device token that
+identifies the phone, or a permanent "this app is running" notification on a
+notes app. Both cost more than they are worth.
 
-So the working pattern is the old one: agree a time, or send a normal text
-saying "now", and both open the app.
-
-**What this costs you:** a message typed while your partner is away is simply
-gone. **What it buys you:** there is no server holding an undelivered message, no
-account linking the two of you, and nothing on either phone afterwards.
+So: what you send gets there. Neither of you is told when. Agree a time, or send
+an ordinary text saying "now".
 
 ---
 

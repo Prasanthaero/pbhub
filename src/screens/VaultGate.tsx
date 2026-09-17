@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
   StatusBar, ScrollView, KeyboardAvoidingView, Platform,
@@ -11,6 +11,10 @@ import {
   generatePairingSecret, bytesToWords, wordsToBytes, PAIRING_BYTES,
 } from '../crypto/wordlist';
 import PairScreen from './PairScreen';
+import PBBot, { type PBMood } from '../ui/PBBot';
+import {
+  readGuard, strike, clearGuard, waitLeft, waitWords, MAX_TRIES,
+} from '../store/guard';
 
 type Props = {
   mode: 'setup' | 'unlock';
@@ -32,6 +36,55 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
   /** The QR sheet: showing this phone's code, or scanning the other's. */
   const [pairing_open, setPairingOpen] = useState(false);
 
+  // ---- PB, who minds the door ---------------------------------------------
+  const [mood, setMood] = useState<PBMood>('idle');
+  const [say, setSay] = useState(mode === 'unlock' ? 'Type it in. I am watching the door.' : '');
+  /** Makes him react a second time to the same kind of news. */
+  const [beat, setBeat] = useState(0);
+  /** Wrong guesses so far, as three dots under him. */
+  const [used, setUsed] = useState(0);
+  /** Milliseconds before anything may be tried again. */
+  const [cool, setCool] = useState(0);
+  const leaving = useRef(false);
+  /** True while he is sleeping off a lockout, so waking him is noticeable. */
+  const waking = useRef(false);
+
+  /**
+   * Watch the cool-off down to zero.
+   *
+   * Read from storage rather than counted here, so backgrounding the app or
+   * killing it does not hand back the tries that were just spent.
+   */
+  useEffect(() => {
+    if (mode !== 'unlock') return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const tick = async () => {
+      const g = await readGuard();
+      if (!alive) return;
+      const left = waitLeft(g);
+      setUsed(left > 0 ? MAX_TRIES : g.strikes);
+      setCool(left);
+      if (left > 0) {
+        setMood('sleepy');
+        setSay('Too many wrong. Come back in ' + waitWords(left) + '.');
+        timer = setTimeout(tick, 1000);
+      } else if (waking.current) {
+        // The wait just ran out while this screen was open: wake him up rather
+        // than leave him asleep in front of a button that now works.
+        waking.current = false;
+        setMood('idle');
+        setBeat((b) => b + 1);
+        setSay('All right. Try again.');
+      }
+      waking.current = left > 0;
+    };
+
+    tick();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [mode]);
+
   const makePairing = () => {
     setPairing(bytesToWords(generatePairingSecret()));
     setGenerated(true);
@@ -52,25 +105,58 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
     setErr('');
 
     if (mode === 'unlock') {
+      if (cool > 0 || leaving.current) return;
+
       setBusy(true);
       await new Promise((r) => setTimeout(r, 30));
-      if (!(await onUnlock(pin))) {
-        setErr('That is not the PIN for this phone.');
-        setBusy(false);
+
+      if (await onUnlock(pin)) {
+        // Getting in forgives every wrong guess before it, including a wait
+        // that is still running.
+        await clearGuard();
+        setUsed(0);
+        setMood('love');
+        setBeat((b) => b + 1);
+        setSay('Welcome back.');
+        return;
       }
+
+      setBusy(false);
+      setPin('');
+      setBeat((b) => b + 1);
+
+      const g = await strike();
+      const left = waitLeft(g);
+
+      if (left > 0) {
+        // Third wrong one. Shut the door and put them back in the notes, where
+        // there is nothing to suggest there was ever another way in.
+        leaving.current = true;
+        setUsed(MAX_TRIES);
+        setCool(left);
+        setMood('locked');
+        setSay('Three wrong. I am closing it.');
+        setTimeout(onCancel, 1700);
+        return;
+      }
+
+      setUsed(g.strikes);
+      setMood('sad');
+      const remaining = MAX_TRIES - g.strikes;
+      setSay(
+        remaining === 1
+          ? 'Not that one. One try left.'
+          : 'That is not it. ' + remaining + ' tries left.',
+      );
       return;
     }
 
     if (pin.trim().length < 4) return setErr('The PIN needs at least 4 characters.');
-    // No spaces. The way in is typing the PIN as one word in a note, and that
-    // route deliberately ignores anything with a space in it so that writing an
-    // ordinary note does not pause for two seconds. Accepting a PIN here that
-    // the note route could never carry would lock someone out of their own
-    // vault, and they would have no way to work out why.
-    if (/s/.test(pin.trim())) {
-      return setErr('No spaces in the PIN — you type it as one word into a note.');
-    }
-    if (pin.trim().length > 64) return setErr('That PIN is too long to type into a note.');
+    // Anything goes, spaces included. There used to be a rule against them,
+    // from when the way in was typing the PIN into a note — and the rule was
+    // written /s/ rather than /\s/, so it was quietly rejecting every PIN with
+    // the letter s in it. The note route is gone; so is the rule.
+    if (pin.trim().length > 64) return setErr('That PIN is very long. Keep it under 64.');
     if (pin !== pin2) return setErr('The two PINs do not match.');
 
     const secret = wordsToBytes(pairing);
@@ -101,11 +187,27 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
           <Text style={{ color: T.vaultInkSoft, fontSize: 16 }}>Back</Text>
         </TouchableOpacity>
         <View style={s.body}>
-          <Text style={s.h}>PIN</Text>
+          {/* PB does the talking here. An error line under the box would say
+              the same thing twice, and say it less kindly. */}
+          <View style={s.petWrap}>
+            <PBBot mood={mood} beat={beat} size={116} say={say} />
+          </View>
+
+          <View style={s.dots}>
+            {[0, 1, 2].map((i) => (
+              <View key={i} style={[s.tryDot, i < used && s.tryDotUsed]} />
+            ))}
+          </View>
+
           <TextInput
-            style={s.input}
+            style={[s.input, cool > 0 && s.inputMuted]}
             value={pin}
-            onChangeText={(t) => { setPin(t); if (err) setErr(''); }}
+            onChangeText={(t) => {
+              setPin(t);
+              if (err) setErr('');
+              if (mood === 'sad') { setMood('idle'); setSay('Go on.'); }
+            }}
+            editable={cool === 0 && !leaving.current}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
@@ -113,15 +215,21 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
             // which locked out anyone whose PIN had a letter in it — setup
             // accepts any characters, so this must too. A keyboard that cannot
             // type the PIN the app itself allowed is not a small bug.
-            placeholder="your PIN"
+            placeholder={cool > 0 ? 'wait' : 'your PIN'}
             placeholderTextColor={T.vaultInkSoft}
-            autoFocus
+            autoFocus={cool === 0}
             onSubmitEditing={go}
             returnKeyType="go"
           />
           {!!err && <Text style={s.err}>{err}</Text>}
-          <TouchableOpacity style={[s.btn, busy && { opacity: 0.6 }]} onPress={go} disabled={busy}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.btnText}>Open</Text>}
+          <TouchableOpacity
+            style={[s.btn, (busy || cool > 0) && { opacity: 0.5 }]}
+            onPress={go}
+            disabled={busy || cool > 0 || leaving.current}
+          >
+            {busy
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={s.btnText}>{cool > 0 ? waitWords(cool) : 'Open'}</Text>}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -157,6 +265,10 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
         enabled={Platform.OS === 'ios' || inExpoGo}
       >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+          <View style={{ alignItems: 'center', marginBottom: 14 }}>
+            <PBBot mood="happy" size={86} say="I am PB. I will look after this." />
+          </View>
+
           <Text style={s.h}>Set up</Text>
 
           <Text style={s.step}>1 · Connect the two phones</Text>
@@ -195,9 +307,8 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
 
           <Text style={s.step}>2 · Your PIN</Text>
           <Text style={s.sub}>
-            This is what you type into a new note to open the chat. It stays on this phone and
-            never goes anywhere, so it can be short. A longer one is harder for anyone holding
-            your phone to guess.
+            This opens the chat on this phone. It never leaves it. Three wrong tries and PB
+            shuts the door, and the next attempt has to wait.
           </Text>
 
           <TextInput
@@ -228,7 +339,7 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
           </TouchableOpacity>
 
           <Text style={s.note}>
-            After this, you get in by opening a new note and typing your PIN into it.
+            After this, hold down the + button on the notes list to get back here.
           </Text>
 
           <View style={{ height: 40 }} />
@@ -250,6 +361,13 @@ const s = StyleSheet.create({
     color: T.vaultInk, fontSize: 16, marginBottom: 12, borderWidth: 1, borderColor: T.vaultLine,
   },
   inputMuted: { opacity: 0.45 },
+  petWrap: { alignItems: 'center', marginTop: 8, marginBottom: 18 },
+  dots: { flexDirection: 'row', justifyContent: 'center', gap: 9, marginBottom: 18 },
+  tryDot: {
+    width: 9, height: 9, borderRadius: 5,
+    backgroundColor: T.vaultLine, borderWidth: 1, borderColor: T.vaultLine,
+  },
+  tryDotUsed: { backgroundColor: T.danger, borderColor: T.danger },
   err: { color: T.danger, marginBottom: 12, fontSize: 14, lineHeight: 20 },
   btn: {
     backgroundColor: T.mine, borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 10,

@@ -13,6 +13,7 @@ import {
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { T } from '../theme';
 import type { Msg } from '../store/messages';
+import PBBot, { PB_LINES, type PBMood } from '../ui/PBBot';
 import {
   STATUS_MAX_CHARS, STATUS_VIDEO_SECONDS, timeLeft, isLiveItem, type StatusItem,
 } from '../store/status';
@@ -199,6 +200,14 @@ export default function Chat({
   /** Hide the status row while the keyboard is up, so the chat keeps the room. */
   const [typing, setTyping] = useState(false);
 
+  /** PB, once the door is behind us. Poke him while you wait for a reply. */
+  const [pbMood, setPbMood] = useState<PBMood>('idle');
+  const [pbSay, setPbSay] = useState('');
+  const [pbBeat, setPbBeat] = useState(0);
+  const [pbGone, setPbGone] = useState(false);
+  const pbTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pbLast = useRef(-1);
+
   /** How far the message box has to rise to clear the keyboard. */
   const { inset, onLayout } = useKeyboardInset();
 
@@ -376,6 +385,47 @@ export default function Chat({
     );
 
   const selecting = selected.size > 0;
+
+  /** A poke: he says one thing, throws a few hearts, and settles down again. */
+  const pokePB = () => {
+    let i = Math.floor(Math.random() * PB_LINES.length);
+    if (i === pbLast.current) i = (i + 1) % PB_LINES.length;
+    pbLast.current = i;
+    setPbSay(PB_LINES[i]);
+    setPbMood(Math.random() < 0.4 ? 'happy' : 'love');
+    setPbBeat((b) => b + 1);
+    if (pbTimer.current) clearTimeout(pbTimer.current);
+    pbTimer.current = setTimeout(() => { setPbSay(''); setPbMood('idle'); }, 2600);
+  };
+
+  /** Held down by mistake is the usual reason, so this asks first. */
+  const hidePB = () => {
+    Alert.alert(
+      'Send PB away?',
+      'He comes back the next time you open the chat.',
+      [
+        { text: 'Keep him' },
+        {
+          text: 'Hide',
+          style: 'destructive',
+          onPress: () => { setPbSay(''); setPbGone(true); },
+        },
+      ],
+    );
+  };
+
+  // He notices when the other one starts writing, which is usually a second or
+  // two before anything appears.
+  useEffect(() => {
+    if (!theirTyping || pbGone) return;
+    setPbMood('happy');
+    setPbSay('they are writing');
+    setPbBeat((b) => b + 1);
+    if (pbTimer.current) clearTimeout(pbTimer.current);
+    pbTimer.current = setTimeout(() => { setPbSay(''); setPbMood('idle'); }, 2600);
+  }, [theirTyping, pbGone]);
+
+  useEffect(() => () => { if (pbTimer.current) clearTimeout(pbTimer.current); }, []);
   /**
    * What the line at the top says, and what colour the dot is.
    *
@@ -593,6 +643,25 @@ export default function Chat({
             );
           }}
         />
+
+        {/* PB, off duty. He sits out of the way of the last message and is
+            gone while the keyboard is up, where there is no room for him. */}
+        {!pbGone && !typing && !selecting && (
+          <View style={s.pet} pointerEvents="box-none">
+            <PBBot
+              mood={pbMood}
+              beat={pbBeat}
+              size={54}
+              say={pbSay}
+              onPress={pokePB}
+              onLongPress={hidePB}
+              // Both he and his bubble hang off the right edge. Centred, which
+              // is what the door screen wants, he would hop sideways every time
+              // a bubble appeared and take the eye with him.
+              style={{ alignItems: 'flex-end' }}
+            />
+          </View>
+        )}
 
         {recording ? (
           <View style={s.recBar}>
@@ -954,6 +1023,10 @@ const s = StyleSheet.create({
   metaSize: { color: 'rgba(255,255,255,0.5)', fontSize: 10 },
   time: { color: 'rgba(255,255,255,0.55)', fontSize: 10 },
   tick: { color: 'rgba(255,255,255,0.75)', fontSize: 10 },
+
+  // Above the message box, hard against the right edge, where he covers the
+  // corner of a bubble at worst and never the text.
+  pet: { position: 'absolute', right: 8, bottom: 120, alignItems: 'flex-end' },
 
   composer: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 8,

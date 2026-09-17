@@ -48,7 +48,8 @@
     "android:build": "expo run:android --variant release",
     "test:crypto": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-crypto.mjs",
     "test:signaling": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-signaling.mjs",
-    "test": "npm run test:crypto && npm run test:signaling && npm run test:mailbox",
+    "test:guard": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-guard.mjs",
+    "test": "npm run test:crypto && npm run test:signaling && npm run test:mailbox && npm run test:guard",
     "icons": "node scripts/make-icons.cjs",
     "dev": "expo run:android",
     "test:mailbox": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-mailbox.mjs"

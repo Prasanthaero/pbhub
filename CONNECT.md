@@ -193,16 +193,18 @@ you where a message is:
 | `✓✓` | their phone has it |
 | `!` | it never got through |
 
-**Pictures, video and voice notes do not wait.** Those only send when you are
-both in the app, and you are told rather than the picture being queued. A text
-is small and opaque; queueing your photos on a server is the thing this app
-exists not to do.
+**Pictures, video and voice notes wait too**, under a smaller size limit than a
+live transfer. They are sealed on this phone before they go, so the relay holds
+ciphertext and drops it the moment the other phone collects it — but it does
+have to hold it in memory until then, which is why the limit is lower.
 
-**There are still no notifications.** Nothing rings or buzzes when a message
-arrives — you find out by opening the app. A notification would mean Google's
-servers and a device token permanently identifying the phone, and keeping the
-connection alive in the background would mean a foreground service, which
-Android shows as a permanent notification: not a look a notes app can carry.
+**There are still no push notifications.** A red dot can appear in the status bar
+if the app is alive in the background when something lands; once Android
+suspends it, nothing arrives to put a dot on, and you find out by opening the
+app. Real push would mean Google's servers and a device token permanently
+identifying the phone, and keeping the connection alive in the background would
+mean a foreground service, which Android shows as a permanent notification: not
+a look a notes app can carry.
 
 ---
 
