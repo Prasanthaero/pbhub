@@ -762,7 +762,30 @@ export default function App() {
         setConnected(open);
         setStatus(open ? 'Connected, direct' : 'Waiting for partner…');
         if (!open) return;
-        pushSystem('Connected directly.');
+
+        /**
+         * Say how, not just that.
+         *
+         * "Connected directly" used to be printed whenever the channel opened,
+         * which says only that the two phones can reach each other somehow.
+         * When neither can be reached directly — mobile networks put most
+         * phones behind carrier NAT — everything goes through the TURN server
+         * instead, and a free TURN server is a few hundred kilobits shared
+         * between strangers. Video over that looks terrible, and the app was
+         * cheerfully reporting a direct connection while it happened.
+         *
+         * Asked a moment later because the candidate pair is not chosen the
+         * instant the channel opens.
+         */
+        pushSystem('Connected.');
+        setTimeout(async () => {
+          const how = await peerRef.current?.route();
+          if (how === 'relay') {
+            pushSystem('Going through a relay — calls will look worse than usual.');
+          } else if (how === 'direct') {
+            pushSystem('Phone to phone, no server in between.');
+          }
+        }, 2500);
 
         // First time the two phones have ever met on this pairing. Remember it,
         // so the "not paired yet" warning stops for good.

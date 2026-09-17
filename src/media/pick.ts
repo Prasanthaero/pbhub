@@ -112,7 +112,15 @@ export async function pickVideo(fromCamera: boolean): Promise<Picked | null> {
 
   const opts: ImagePicker.ImagePickerOptions = {
     mediaTypes: ['videos'],
-    quality: 0.5,
+    // There was a `quality: 0.5` here, which did nothing: the picker documents
+    // `quality` as image compression only. It was not making videos smaller,
+    // and removing it does not make them worse — it only stops the code
+    // claiming to do something it never did.
+    //
+    // Video is passed through as the camera recorded it. Re-encoding it on the
+    // phone would take longer than sending it, and there is no honest way to
+    // shrink a video a little.
+    //
     // A minute of phone video is already tens of megabytes; the cap exists so a
     // send cannot run for ten minutes and then fail.
     videoMaxDuration: 60,

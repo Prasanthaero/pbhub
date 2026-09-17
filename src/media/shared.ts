@@ -23,9 +23,20 @@ import { MAX_MEDIA_BYTES } from '../net/transport';
 import type { MediaKind } from '../store/messages';
 
 
-/** Small enough to store comfortably and to send in a blink. */
-const STATUS_MAX_EDGE = 1080;
-const STATUS_QUALITY = 0.6;
+/**
+ * How much of a photograph survives being sent.
+ *
+ * It was 1080px at quality 0.6, chosen when the worry was size. That is visibly
+ * soft on a modern phone screen — skin goes waxy and anything with text in it
+ * turns to mush — and the saving was smaller than it looked: a 1440px JPEG at
+ * 0.82 is normally 400–800KB, which still goes down the direct channel in a
+ * blink and still fits in the mailbox for a partner who is not there.
+ *
+ * Above about 0.85, JPEG spends a lot of bytes on detail nobody can see. Below
+ * about 0.7 it starts eating faces. 0.82 sits where the curve turns.
+ */
+const STATUS_MAX_EDGE = 1440;
+const STATUS_QUALITY = 0.82;
 
 export type SharedItem = {
   kind: MediaKind | 'text';

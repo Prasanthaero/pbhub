@@ -31,6 +31,15 @@ import type { MediaKind } from '../store/messages';
 
 export type CallKind = 'audio' | 'video';
 
+/**
+ * The most this phone will spend on outgoing video, per second.
+ *
+ * 2.5 Mbit is a good 720p picture and is not extravagant on wifi. It is a
+ * ceiling the encoder may never reach: WebRTC probes the link and uses what is
+ * actually there, so on a slow connection this number is simply never relevant.
+ */
+const VIDEO_MAX_BITRATE = 2_500_000;
+
 export type PeerEvents = {
   onChannelOpen: (open: boolean) => void;
   onEnvelope: (e: Envelope) => void;
@@ -345,12 +354,92 @@ export class Peer {
     if (this.localStream) return this.localStream;
     const stream = (await mediaDevices().getUserMedia({
       audio: true,
-      video: kind === 'video' ? { facingMode: 'user', width: 1280, height: 720 } : false,
+      video: kind === 'video'
+        ? {
+            facingMode: 'user',
+            // `ideal`, not a bare number. A plain `width: 1280` is read as a
+            // hard requirement by some implementations, and a phone whose
+            // camera has no exactly-1280 mode then falls back to whatever it
+            // feels like — which is how a call ends up at 320x240 on hardware
+            // perfectly capable of 720p.
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 },
+          }
+        : false,
     })) as MediaStream;
     this.localStream = stream;
     this.senders = stream.getTracks().map((t: any) => this.pc.addTrack(t, stream));
+    if (kind === 'video') this.raiseVideoCeiling();
     this.ev.onLocalStream(stream);
     return stream;
+  }
+
+  /**
+   * Let the video climb.
+   *
+   * Without this the sender runs on whatever the implementation defaults to,
+   * and those defaults are conservative — they were chosen for conference calls
+   * with several participants on unknown networks, not for two phones.
+   *
+   * This is a ceiling, not a demand. WebRTC measures what the link will carry
+   * and uses what it can; raising the limit only removes an obstacle that was
+   * there when the link was good. On a bad link it changes nothing, which is
+   * worth being clear about — see `route()` for what usually is the problem.
+   */
+  private async raiseVideoCeiling(): Promise<void> {
+    const sender: any = this.senders.find((s: any) => s?.track?.kind === 'video');
+    if (!sender?.getParameters || !sender?.setParameters) return;
+    try {
+      const params = sender.getParameters();
+      params.encodings = params.encodings?.length ? params.encodings : [{}];
+      for (const e of params.encodings) {
+        e.maxBitrate = VIDEO_MAX_BITRATE;
+        e.maxFramerate = 30;
+        // Some implementations arrive with the resolution already halved.
+        e.scaleResolutionDownBy = 1;
+      }
+      await sender.setParameters(params);
+    } catch {
+      // An implementation that will not take these keeps its own defaults,
+      // which is where it was a moment ago. Not worth failing a call over.
+    }
+  }
+
+  /**
+   * Whether the media is actually going phone to phone.
+   *
+   * The chat channel opening says the two phones can reach each other. It does
+   * NOT say how. When neither phone can be reached directly — carrier CGNAT is
+   * the usual reason — everything goes through the TURN server instead, and a
+   * free TURN server is a few hundred kilobits shared between strangers. The
+   * call still connects; it just looks like it was filmed through a window.
+   *
+   * That is the single most common reason for bad video here, and until now the
+   * app said "Connected directly" either way.
+   */
+  async route(): Promise<'direct' | 'relay' | null> {
+    try {
+      const report: any = await this.pc.getStats();
+      const byId = new Map<string, any>();
+      let pair: any = null;
+      report.forEach((r: any) => {
+        byId.set(r.id, r);
+        if (r.type === 'candidate-pair' && r.state === 'succeeded' && (r.nominated ?? true)) {
+          // Several pairs can succeed; the last nominated one is in use.
+          pair = r;
+        }
+      });
+      if (!pair) return null;
+      const local = byId.get(pair.localCandidateId);
+      const remote = byId.get(pair.remoteCandidateId);
+      if (!local && !remote) return null;
+      return local?.candidateType === 'relay' || remote?.candidateType === 'relay'
+        ? 'relay'
+        : 'direct';
+    } catch {
+      return null;
+    }
   }
 
   toggleMute(): boolean {
