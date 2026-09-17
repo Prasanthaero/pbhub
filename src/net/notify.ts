@@ -93,6 +93,7 @@ export async function prepareNotifications(): Promise<boolean> {
  * messages produce one dot rather than a stack that betrays how much was said.
  */
 export async function showDot(): Promise<void> {
+  console.log('[dot] ready?', ready, !!Notifications);
   if (!ready || !Notifications) return;
   try {
     await Notifications.scheduleNotificationAsync({

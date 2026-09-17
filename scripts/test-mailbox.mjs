@@ -27,7 +27,9 @@ await once(srv.stdout, 'data');
 
 const live = [];
 function client(tag, keys) {
-  const log = { role: null, mail: [], done: [], held: [], full: [], acks: [], present: [] };
+  const log = {
+    role: null, mail: [], done: [], held: [], full: [], acks: [], present: [], waiting: [],
+  };
   const s = new Signaling(URL, keys.roomId, keys.msgKey, {
     onReady: (r) => { log.role = r; },
     onPeerPresent: (p) => log.present.push(p),
@@ -39,7 +41,31 @@ function client(tag, keys) {
     onMailHeld: (id) => log.held.push(id),
     onMailFull: (id) => log.full.push(id),
     onAck: (id) => log.acks.push(id),
+    onLive: () => {},
+    onWaiting: () => log.waiting.push(Date.now()),
   });
+  live.push(s);
+  s.connect();
+  return { s, log };
+}
+
+/** The same, but locked: no key, told only that something is waiting. */
+function peek(tag, keys) {
+  const log = { mail: [], waiting: [] };
+  const s = new Signaling(URL, keys.roomId, new Uint8Array(32), {
+    onReady: () => {},
+    onPeerPresent: () => {},
+    onSignal: () => {},
+    onStatus: () => {},
+    onClosed: () => {},
+    onMail: (id, wire, at) => log.mail.push({ id, wire, at }),
+    onMailDone: () => {},
+    onMailHeld: () => {},
+    onMailFull: () => {},
+    onAck: () => {},
+    onLive: () => {},
+    onWaiting: () => log.waiting.push(Date.now()),
+  }, tag, true);
   live.push(s);
   s.connect();
   return { s, log };
@@ -139,6 +165,38 @@ try {
   // at once — so any test written for it would pass because the socket had
   // already been removed, not because the new check did anything. A test that
   // cannot fail for the right reason is worse than none.
+
+  console.log('\na locked phone is told, but not handed, the post');
+  // The dot in the status bar has to work with the vault shut. A locked phone
+  // has no key, so giving it the mail would lose the message — the relay drops
+  // what it delivers. It is told something is waiting and nothing else.
+  b3.s.close();
+  await wait(400);
+
+  const peeker = peek('B6', keys);
+  await wait(600);
+
+  const forLocked = seal(keys.msgKey, JSON.stringify({ k: 'msg', id: 'w1', body: 'psst', at: 1 }));
+  a.s.mail('w1', forLocked);
+  await wait(1000);
+
+  assert.equal(peeker.log.waiting.length, 1, 'the locked phone was never told');
+  assert.equal(peeker.log.mail.length, 0, 'the locked phone was handed mail it cannot read');
+  ok('it learns that something arrived, and is given none of it');
+
+  assert.ok(a.log.held.includes('w1'), 'the relay did not hold it for a locked partner');
+  ok('...and the sender is told it is waiting, not delivered');
+
+  // Unlocking asks for it.
+  peeker.s.collect();
+  await wait(800);
+  const got = peeker.log.mail.find((m) => m.id === 'w1');
+  assert.ok(got, 'unlocking did not hand over what was waiting');
+  assert.equal(JSON.parse(unseal(keys.msgKey, got.wire)).body, 'psst');
+  ok('and unlocking collects it, intact');
+
+  peeker.s.close();
+  await wait(400);
 
   console.log('\nthe mailbox is not free storage');
   b3.s.close();

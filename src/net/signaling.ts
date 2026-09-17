@@ -23,6 +23,13 @@ export type SignalingEvents = {
   onMailDone: (count: number) => void;
   /** A sealed payload worth nothing once the moment has passed. */
   onLive: (wire: string) => void;
+  /**
+   * Something is waiting, and that is all we are told.
+   *
+   * Only ever sent to a locked phone that is listening without a key. The mail
+   * itself stays on the relay until the vault is open and asks for it.
+   */
+  onWaiting: () => void;
   /** The relay is holding this one until the partner opens the app. */
   onMailHeld: (id: string) => void;
   /** The mailbox is full — the partner has been away too long. */
@@ -43,18 +50,23 @@ export class Signaling {
   private key: Uint8Array;
   private ev: SignalingEvents;
 
+  /** Listening without a key: told that mail exists, never handed it. */
+  private peek: boolean;
+
   constructor(
     url: string,
     roomId: string,
     key: Uint8Array,
     ev: SignalingEvents,
     deviceId = '',
+    peek = false,
   ) {
     this.url = url;
     this.roomId = roomId;
     this.deviceId = deviceId;
     this.key = key;
     this.ev = ev;
+    this.peek = peek;
   }
 
   connect() {
@@ -78,7 +90,9 @@ export class Signaling {
 
     ws.onopen = () => {
       this.retry = 0;
-      ws.send(JSON.stringify({ t: 'join', room: this.roomId, device: this.deviceId }));
+      ws.send(JSON.stringify({
+        t: 'join', room: this.roomId, device: this.deviceId, peek: this.peek,
+      }));
     };
 
     ws.onmessage = (e) => {
@@ -109,6 +123,9 @@ export class Signaling {
           // Left sealed on purpose. Unsealing belongs with the code that knows
           // what an envelope is, and the relay never had a chance at it.
           this.ev.onMail(String(msg.id), String(msg.d), Number(msg.at) || Date.now());
+          break;
+        case 'waiting':
+          this.ev.onWaiting();
           break;
         case 'live':
           // Sealed like everything else; opened by the code that knows what an
@@ -180,6 +197,19 @@ export class Signaling {
   live(wire: string) {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify({ t: 'live', d: wire }));
+  }
+
+  /**
+   * Unlocked: stop peeking and take the post.
+   *
+   * Only meaningful on a connection that joined as a listener. The relay has
+   * been holding this phone's mail rather than delivering it, precisely so that
+   * nothing was handed to a phone with no key to open it.
+   */
+  collect() {
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    this.peek = false;
+    this.ws.send(JSON.stringify({ t: 'collect' }));
   }
 
   /** Confirm receipt, so the sender can drop it from their outbox. */

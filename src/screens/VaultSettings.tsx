@@ -202,12 +202,13 @@ export default function VaultSettingsScreen({
             <Text style={s.rowSub}>
               A small dot in the status bar and nothing else — no banner, no name, no preview, no
               sound. Open the app to see what it was.
-              {panic
-                ? ' It cannot work while "lock when the app leaves the screen" is on, because that closes the connection.'
-                : ' It only works while the app is still in the background; once Android closes it, nothing arrives.'}
+              {' '}It works with the vault locked: the phone keeps a keyless ear on the room, so it
+              is told that something came and never what. The message itself stays on the relay
+              until you unlock. It stops if Android closes the app altogether, which it will do
+              eventually — there is no push service here, by design.
             </Text>
           </View>
-          <Switch value={quiet && !panic} onValueChange={setQuiet} disabled={panic} />
+          <Switch value={quiet} onValueChange={setQuiet} />
         </View>
 
         <View style={s.rowItem}>

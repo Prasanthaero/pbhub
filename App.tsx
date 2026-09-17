@@ -132,6 +132,19 @@ export default function App() {
   const [theirStatuses, setTheirStatuses] = useState<StatusItem[]>([]);
 
   const sigRef = useRef<Signaling | null>(null);
+  /**
+   * The locked listener.
+   *
+   * Holds the room id and no key at all. It cannot read a word of what arrives
+   * and is never handed it — the relay keeps the mail until the vault is open
+   * and asks. All it can do is put a dot in the status bar, which is exactly
+   * what the dot was always meant to be.
+   *
+   * This is what lets "lock when the app leaves the screen" and the dot both be
+   * on at once. They used to be mutually exclusive: locking closed the socket,
+   * so nothing arrived to notify about, and the switch sat greyed out.
+   */
+  const peekRef = useRef<Signaling | null>(null);
   const peerRef = useRef<Peer | null>(null);
   const roleRef = useRef<Role>('a');
   const outboxRef = useRef<Pending[]>([]);
@@ -310,7 +323,40 @@ export default function App() {
   }, [unlocked, persistHistory]);
 
   // ---- teardown ----------------------------------------------------------
+  /**
+   * Start listening for the dot, holding nothing that could read a message.
+   *
+   * The room id is a hash. It says which conversation, never what was said, and
+   * it is the one thing that has to survive the lock for a notification to be
+   * possible at all without a push service.
+   */
+  const startPeek = useCallback((roomId: string, cfg: VaultSettings) => {
+    peekRef.current?.close();
+    peekRef.current = null;
+    console.log('[peek] start?', cfg.quietNotifications, !!cfg.relayUrl);
+    if (!cfg.quietNotifications || !cfg.relayUrl) return;
+
+    const deaf = new Signaling(cfg.relayUrl, roomId, new Uint8Array(32), {
+      onReady: () => {},
+      onPeerPresent: () => {},
+      onSignal: () => {},
+      onStatus: () => {},
+      onClosed: () => {},
+      onMail: () => {},
+      onMailDone: () => {},
+      onMailHeld: () => {},
+      onMailFull: () => {},
+      onAck: () => {},
+      onLive: () => {},
+      onWaiting: () => { console.log('[peek] waiting -> dot'); showDot(); },
+    }, cfg.deviceId, true);
+    peekRef.current = deaf;
+    deaf.connect();
+  }, []);
+
   const lock = useCallback(() => {
+    const roomId = keysRef.current?.roomId ?? null;
+    const cfg = settingsRef.current;
     peerRef.current?.destroy();
     peerRef.current = null;
     sigRef.current?.close();
@@ -339,7 +385,12 @@ export default function App() {
     setUnlocked(false);
     setActive(null);
     setScreen('list');
-  }, [setCall]);
+
+    // Closed, but not deaf — if the dot is wanted, keep a keyless ear on the
+    // room. clearDot above wipes any dot from before; this is for what comes
+    // next.
+    if (roomId) startPeek(roomId, cfg);
+  }, [setCall, startPeek]);
 
   /**
    * Close the vault if the phone is left sitting on it.
@@ -718,6 +769,8 @@ export default function App() {
   }, [applyEnvelope, flushOutbox, pushSystem]);
 
   const connect = useCallback((keys: VaultKeys, cfg: VaultSettings) => {
+    peekRef.current?.close();
+    peekRef.current = null;
     const sig = new Signaling(cfg.relayUrl, keys.roomId, keys.msgKey, {
       onReady: (role) => {
         roleRef.current = role;
@@ -769,6 +822,9 @@ export default function App() {
         const e = unwrap(wire);
         if (e) applyEnvelope(e);
       },
+      // Only a locked listener is ever told this; the open vault collects its
+      // mail properly and has no use for it.
+      onWaiting: () => {},
       onMailHeld: (id) => markDelivered(id, 'held'),
       onMailFull: (id) => markDelivered(id, 'failed'),
       onAck: (id) => {
@@ -1408,13 +1464,28 @@ export default function App() {
           onSave={async (incoming) => {
             let next = incoming;
             const keys = keysRef.current;
-            const wasKeeping = settingsRef.current.keepHistory;
+            // Read what it was BEFORE overwriting it. This used to assign first
+            // and then compare the new settings against themselves, so the test
+            // was always false and Android was never asked for permission to
+            // post a notification — the switch went on and the dot never came,
+            // with the system quietly recording the app as importance=NONE.
+            const before = settingsRef.current;
+            const wasKeeping = before.keepHistory;
+
+            if (next.quietNotifications && !before.quietNotifications) {
+              const allowed = await prepareNotifications();
+              if (!allowed) {
+                next = { ...next, quietNotifications: false };
+                Alert.alert(
+                  'Android said no',
+                  'The dot needs permission to post a notification. Allow notifications for '
+                  + 'Notes in Android settings, then turn this back on.',
+                );
+              }
+            }
+
             setSettings(next);
             settingsRef.current = next;
-            if (next.quietNotifications && !settingsRef.current.quietNotifications) {
-              const allowed = await prepareNotifications();
-              if (!allowed) next = { ...next, quietNotifications: false };
-            }
             if (keys) await writeSettings(keys.msgKey, next);
 
             // Turning history off takes the existing log with it — otherwise

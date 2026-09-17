@@ -113,6 +113,22 @@ wss.on('connection', (ws) => {
   ws.role = null;
   /** Stable per-install id, so a reconnect can replace its own dead socket. */
   ws.device = null;
+  /**
+   * Listening, but locked.
+   *
+   * A phone whose vault has closed still wants to know that something arrived —
+   * that is the whole point of the dot in the status bar. It has no key any
+   * more, so it must not be handed the mail: the relay drops a message the
+   * moment it is delivered, and delivering to somebody who cannot read it, and
+   * is not storing it, would lose it. A peeking client is told that something
+   * is waiting and nothing else, and the mail stays here until they unlock and
+   * ask for it.
+   *
+   * It is also not 'present' for the other side. They are not in the app, and
+   * saying they were would put online on their partner's screen over a locked
+   * phone, and send messages down a channel nobody is listening to.
+   */
+  ws.peek = false;
   ws.lastSeen = Date.now();
 
   ws.on('pong', () => {
@@ -182,7 +198,18 @@ wss.on('connection', (ws) => {
       room.clients.add(ws);
       rooms.set(id, room);
 
-      send(ws, { t: 'joined', role: ws.role, peer: room.clients.size === 2 });
+      ws.peek = msg.peek === true;
+
+      const others = [...room.clients].filter((c) => c !== ws && !c.peek);
+      send(ws, { t: 'joined', role: ws.role, peer: others.length > 0 });
+
+      if (ws.peek) {
+        // Locked and listening. Say whether anything is already waiting, and
+        // leave it where it is.
+        if (room.mail[ws.role].length) send(ws, { t: 'waiting' });
+        return;
+      }
+
       peersOf(ws).forEach((p) => send(p, { t: 'peer', present: true }));
 
       // Anything that arrived while this peer was away.
@@ -215,7 +242,9 @@ wss.on('connection', (ws) => {
       // acknowledgement of any kind and its message sat at one dot until
       // something else happened to flush the outbox. Held is the honest answer
       // for a partner whose connection is already dead.
-      const live = [...room.clients].find((c) => c.role === target && c.readyState === c.OPEN);
+      const live = [...room.clients].find(
+        (c) => c.role === target && c.readyState === c.OPEN && !c.peek,
+      );
 
       // Partner is here: hand it over and let them acknowledge directly.
       if (live) {
@@ -232,6 +261,14 @@ wss.on('connection', (ws) => {
       queue.push({ id: msg.id, d: msg.d, at: Date.now() });
       room.bytes[target] += msg.d.length;
       send(ws, { t: 'mail-held', id: msg.id });
+
+      // Their phone may be locked but listening. It cannot read this and is not
+      // being given it — it is only being told that something came, so it can
+      // put a dot in the status bar.
+      const peeking = [...room.clients].find(
+        (c) => c.role === target && c.readyState === c.OPEN && c.peek,
+      );
+      if (peeking) send(peeking, { t: 'waiting' });
       return;
     }
 
@@ -249,8 +286,24 @@ wss.on('connection', (ws) => {
       if (!room) return;
       reap(room);
       const target = otherRole(ws.role);
-      const there = [...room.clients].find((c) => c.role === target && c.readyState === c.OPEN);
+      const there = [...room.clients].find(
+        (c) => c.role === target && c.readyState === c.OPEN && !c.peek,
+      );
       if (there) send(there, { t: 'live', d: msg.d });
+      return;
+    }
+
+    /** Unlocked: stop peeking, join properly, and take the post. */
+    if (msg.t === 'collect') {
+      if (!ws.peek) return;
+      ws.peek = false;
+      peersOf(ws).forEach((p) => send(p, { t: 'peer', present: true }));
+      const room = rooms.get(ws.roomId);
+      if (room) {
+        const others = [...room.clients].filter((c) => c !== ws && !c.peek);
+        send(ws, { t: 'joined', role: ws.role, peer: others.length > 0 });
+      }
+      deliverMail(ws);
       return;
     }
 
