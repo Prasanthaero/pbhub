@@ -49,10 +49,11 @@
     "test:crypto": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-crypto.mjs",
     "test:signaling": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-signaling.mjs",
     "test:guard": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-guard.mjs",
-    "test": "npm run test:crypto && npm run test:signaling && npm run test:mailbox && npm run test:guard",
+    "test": "npm run test:crypto && npm run test:signaling && npm run test:mailbox && npm run test:guard && npm run test:pb",
     "icons": "node scripts/make-icons.cjs",
     "dev": "expo run:android",
-    "test:mailbox": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-mailbox.mjs"
+    "test:mailbox": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-mailbox.mjs",
+    "test:pb": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/test-pb.mjs"
   },
   "private": true
 }

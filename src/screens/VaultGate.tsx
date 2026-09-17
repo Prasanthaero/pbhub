@@ -327,7 +327,11 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
             }}
             autoCapitalize="none"
             autoCorrect={false}
-            keyboardType="number-pad"
+            // iOS's number pad has no return key and no way off it — with a
+            // PIN field below this one, that is a dead end on a phone where the
+            // keyboard covers what you would tap next. Its numbers-and-
+            // punctuation keyboard is digits first and has a return key.
+            keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'number-pad'}
             placeholder={`or type the ${PAIRING_DIGITS} numbers from the other phone`}
             placeholderTextColor={T.vaultInkSoft}
           />

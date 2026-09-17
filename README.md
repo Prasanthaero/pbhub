@@ -97,6 +97,18 @@ keyboard is up.
 He also notices when the other one starts typing, a second or two before
 anything appears.
 
+**And he follows the conversation.** A message with a heart in it, or the word
+love, or *kadhal*, or *காதல்*, leaves him in love for a minute — pink eyes, a
+heart for a mouth. "good night" puts him to sleep. A joke makes him laugh,
+*sorry* makes him sulk, a photo makes him look up. An ordinary message about
+milk and eggs leaves him alone, which is the harder half.
+
+That reading is a word list in [`src/ui/pbMood.ts`](src/ui/pbMood.ts) — English
+and Tamil, typed either way. It runs on the phone, on text that is already
+decrypted and already on the screen, and it chooses one of six faces. Nothing is
+sent anywhere, nothing is written down, and there is no model and no service
+involved. The whole of it is one file you can read in a minute.
+
 > **Nobody can recover any of this.** Not you, not us, not the relay. There is
 > no reset. If you both forget your PINs and lose the pairing code, the vault is
 > gone and you set up a new one.

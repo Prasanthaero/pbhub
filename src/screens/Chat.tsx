@@ -14,6 +14,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { T } from '../theme';
 import type { Msg } from '../store/messages';
 import PBBot, { PB_LINES, PB_EMOJI, type PBMood } from '../ui/PBBot';
+import { readMood } from '../ui/pbMood';
 import {
   STATUS_MAX_CHARS, STATUS_VIDEO_SECONDS, timeLeft, isLiveItem, type StatusItem,
 } from '../store/status';
@@ -74,6 +75,14 @@ const BREATHING_ROOM = 40;
 
 /** How long a mood put on PB from the tray stays on him. */
 const PB_WEAR_MS = 2 * 60 * 1000;
+
+/**
+ * And how long a mood he caught from the conversation stays.
+ *
+ * Shorter than one you chose deliberately: the next message should be able to
+ * change his mind, or he is not really following along.
+ */
+const PB_CHAT_WEAR_MS = 45 * 1000;
 
 /**
  * "last seen 12:30 AM", with the day added once it is no longer today.
@@ -221,6 +230,8 @@ export default function Chat({
    */
   const pbWorn = useRef<PBMood>('idle');
   const pbWearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The last message he has already had a feeling about. */
+  const pbReadUpTo = useRef<string | null>(null);
 
   /** How far the message box has to rise to clear the keyboard. */
   const { inset, onLayout } = useKeyboardInset();
@@ -427,6 +438,17 @@ export default function Chat({
     pbMoment('sent', 'happy');
   };
 
+  /** Put a mood on him that outlasts the sentence he says about it. */
+  const wearMood = (mood: PBMood, line: string, ms: number) => {
+    pbWorn.current = mood;
+    pbMoment(line, mood);
+    if (pbWearTimer.current) clearTimeout(pbWearTimer.current);
+    pbWearTimer.current = setTimeout(() => {
+      pbWorn.current = 'idle';
+      setPbMood('idle');
+    }, ms);
+  };
+
   /**
    * Hold in the tray: PB puts that mood on for a couple of minutes.
    *
@@ -435,13 +457,7 @@ export default function Chat({
    */
   const wearEmoji = (item: { e: string; mood: PBMood; line: string }) => {
     setPbTray(false);
-    pbWorn.current = item.mood;
-    pbMoment(item.line, item.mood);
-    if (pbWearTimer.current) clearTimeout(pbWearTimer.current);
-    pbWearTimer.current = setTimeout(() => {
-      pbWorn.current = 'idle';
-      setPbMood('idle');
-    }, PB_WEAR_MS);
+    wearMood(item.mood, item.line, PB_WEAR_MS);
   };
 
   /** Held down by mistake is the usual reason, so this asks first. */
@@ -468,6 +484,31 @@ export default function Chat({
     pbMoment('they are writing', 'happy');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [theirTyping, pbGone]);
+
+  /**
+   * He takes the mood of the conversation.
+   *
+   * Only the newest message, and only one that arrived while the chat was open
+   * — opening a chat with yesterday's goodnight at the bottom of it should not
+   * put him straight to sleep. See pbMood: the reading is a word list on this
+   * phone, over text that is already on the screen.
+   */
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last) return;
+
+    // Already had a feeling about this one. Without this he would react again
+    // every time anything else on the screen changed.
+    if (pbReadUpTo.current === last.id) return;
+
+    const first = pbReadUpTo.current === null;
+    pbReadUpTo.current = last.id;
+    if (first || pbGone || last.kind === 'system') return;
+
+    const felt = readMood(last.body, !!last.media);
+    if (felt) wearMood(felt.mood, felt.line, PB_CHAT_WEAR_MS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, pbGone]);
 
   useEffect(() => () => {
     if (pbTimer.current) clearTimeout(pbTimer.current);
