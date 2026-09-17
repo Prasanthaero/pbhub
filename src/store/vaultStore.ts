@@ -144,6 +144,16 @@ export type VaultSettings = {
    * cannot disagree — see Expiring in store/messages.ts.
    */
   messageTtl: number;
+  /**
+   * Lock the vault after this long without a touch. Milliseconds; 0 is never.
+   *
+   * The panic lock only fires when the app leaves the screen. It does nothing
+   * about the commonest way a conversation is seen by the wrong person: the
+   * phone put down, still open, and picked up by somebody else. A photo you
+   * meant to delete and forgot is exposed for exactly as long as the phone
+   * stays awake.
+   */
+  idleLockMs: number;
 };
 
 export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
@@ -156,6 +166,7 @@ export const defaultSettings = (relayUrl = DEFAULT_RELAY): VaultSettings => ({
   sendReadReceipts: true,
   quietNotifications: false,
   messageTtl: 0,
+  idleLockMs: 3 * 60 * 1000,
   deviceId: toHex(randomBytes(16)),
 });
 

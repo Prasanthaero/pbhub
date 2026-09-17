@@ -8,7 +8,7 @@ import { T } from '../theme';
 import { DEFAULT_ICE, RELAY_EXAMPLE, type VaultSettings } from '../store/vaultStore';
 import QRCode from 'react-native-qrcode-svg';
 import { encodePairing } from '../crypto/pairingCode';
-import { TTL_CHOICES } from '../store/messages';
+import { TTL_CHOICES, IDLE_CHOICES } from '../store/messages';
 
 type Props = {
   settings: VaultSettings;
@@ -39,6 +39,7 @@ export default function VaultSettingsScreen({
   const [advanced, setAdvanced] = useState(false);
   const [quiet, setQuiet] = useState(settings.quietNotifications);
   const [ttl, setTtl] = useState(settings.messageTtl);
+  const [idle, setIdle] = useState(settings.idleLockMs);
   const [err, setErr] = useState('');
 
   const savePin = async () => {
@@ -70,6 +71,7 @@ export default function VaultSettingsScreen({
       sendReadReceipts: receipts,
       quietNotifications: quiet,
       messageTtl: ttl,
+      idleLockMs: idle,
       // Neither of these is a user setting: one records that the two phones
       // have actually met, the other identifies this install to the relay.
       // Saving other settings must not quietly reset either.
@@ -165,6 +167,25 @@ export default function VaultSettingsScreen({
         </View>
 
         <Text style={s.section}>Safety</Text>
+        <Text style={s.rowTitle}>Lock itself after</Text>
+        <Text style={s.rowSub}>
+          A phone put down with the chat still open is how the wrong person sees it — a photo you
+          meant to delete and forgot stays there for as long as the screen is awake. After this
+          long without a touch, the vault closes and the PIN is needed again. Never runs during a
+          call.
+        </Text>
+        <View style={s.chips}>
+          {IDLE_CHOICES.map((c) => (
+            <TouchableOpacity
+              key={c.label}
+              style={[s.chip, idle === c.ms && s.chipOn]}
+              onPress={() => setIdle(c.ms)}
+            >
+              <Text style={[s.chipText, idle === c.ms && s.chipTextOn]}>{c.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         <View style={s.rowItem}>
           <View style={{ flex: 1, paddingRight: 12 }}>
             <Text style={s.rowTitle}>Lock when the app leaves the screen</Text>

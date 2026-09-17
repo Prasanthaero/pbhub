@@ -100,7 +100,7 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-dot.png",
-          "color": "#C9A227",
+          "color": "#E5484D",
           "sounds": []
         }
       ],

@@ -435,11 +435,14 @@ export default function Chat({
           </View>
 
           <View style={{ flexDirection: 'row', gap: 14 }}>
-            <TouchableOpacity onPress={() => onCall('audio')} disabled={!connected} hitSlop={8}>
-              <Text style={[s.icon, !connected && s.iconOff]}>Call</Text>
+            {/* Offered whenever they are in the app. The direct connection forms
+                on demand; waiting for it to exist first left both buttons grey
+                while the two of them were plainly looking at each other. */}
+            <TouchableOpacity onPress={() => onCall('audio')} disabled={!peerPresent} hitSlop={8}>
+              <Text style={[s.icon, !peerPresent && s.iconOff]}>Call</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => onCall('video')} disabled={!connected} hitSlop={8}>
-              <Text style={[s.icon, !connected && s.iconOff]}>Video</Text>
+            <TouchableOpacity onPress={() => onCall('video')} disabled={!peerPresent} hitSlop={8}>
+              <Text style={[s.icon, !peerPresent && s.iconOff]}>Video</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={8}>
               <Text style={s.icon}>•••</Text>

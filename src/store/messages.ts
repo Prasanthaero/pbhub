@@ -126,3 +126,12 @@ export function place(msgs: Msg[], next: Msg): Msg[] {
 export function placeAll(msgs: Msg[], next: Msg[]): Msg[] {
   return next.reduce(place, msgs);
 }
+
+/** How long the vault may sit untouched before it closes itself. */
+export const IDLE_CHOICES: { label: string; ms: number }[] = [
+  { label: '1 min', ms: 60 * 1000 },
+  { label: '3 min', ms: 3 * 60 * 1000 },
+  { label: '5 min', ms: 5 * 60 * 1000 },
+  { label: '10 min', ms: 10 * 60 * 1000 },
+  { label: 'Never', ms: 0 },
+];

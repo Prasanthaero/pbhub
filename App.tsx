@@ -47,6 +47,25 @@ import CallScreen, { type CallState } from './src/screens/Call';
 import VaultSettingsScreen from './src/screens/VaultSettings';
 import SharedSheet from './src/screens/SharedSheet';
 
+/**
+ * How long after a picker hands back before the lock is armed again.
+ *
+ * The picker resolves while its activity is still finishing, so the app is not
+ * on screen yet and a background event can still be in flight behind it.
+ */
+const SETTLE_MS = 1500;
+
+/**
+ * And the longest this app will stay unlocked off screen, whatever it thinks
+ * it is waiting for.
+ *
+ * Every excuse for not locking — a camera, a permission dialog, a share sheet —
+ * is over in a second or two. Anything still "waiting" after this is a bug in
+ * our own bookkeeping, and the right answer to a bug in the thing guarding the
+ * vault is to lock the vault. Fail safe, never fail open.
+ */
+const AWAY_LIMIT_MS = 20_000;
+
 type Screen = 'list' | 'editor' | 'gate' | 'chat' | 'call' | 'settings' | 'shared';
 type CallInfo = { kind: CallKind; state: CallState };
 
@@ -322,6 +341,43 @@ export default function App() {
     setScreen('list');
   }, [setCall]);
 
+  /**
+   * Close the vault if the phone is left sitting on it.
+   *
+   * The panic lock only fires when the app leaves the screen, which does
+   * nothing about the commonest way the wrong person sees a conversation: the
+   * phone put down, still open, and picked up by somebody else. A photo you
+   * meant to delete and forgot stays on screen for as long as the phone is
+   * awake. This closes it after a few quiet minutes.
+   *
+   * Reset by any touch anywhere (see the responder on the root view below), and
+   * never while a call is up — watching someone talk is not being idle.
+   */
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const nudgeIdle = useCallback(() => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = null;
+    const after = settingsRef.current.idleLockMs;
+    if (!unlocked || !after) return;
+    idleTimer.current = setTimeout(() => {
+      idleTimer.current = null;
+      if (!callRef.current) lock();
+    }, after);
+    // settings.idleLockMs is read through the ref, but it belongs in the
+    // dependencies: changing the setting has to rebuild this and re-arm the
+    // effect below, or the old interval keeps running until the next unlock.
+  }, [unlocked, lock, settings.idleLockMs]);
+
+  // Start it on unlock, stop it on lock.
+  useEffect(() => {
+    nudgeIdle();
+    return () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+      idleTimer.current = null;
+    };
+  }, [nudgeIdle]);
+
   // Leaving the foreground closes everything, if asked to.
   //
   // Deliberately 'background' and not "anything but active": Android reports
@@ -337,13 +393,10 @@ export default function App() {
    * guard while the outer one is still on screen.
    */
   const awayOnPurpose = useRef(0);
-  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Armed when we go off screen without locking; fires if we never come back. */
+  const deadMansTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const leaveOnPurpose = useCallback(() => {
-    if (settleTimer.current) {
-      clearTimeout(settleTimer.current);
-      settleTimer.current = null;
-    }
     awayOnPurpose.current += 1;
   }, []);
 
@@ -361,11 +414,14 @@ export default function App() {
    * way means losing the vault mid-action, every single time.
    */
   const returnedOnPurpose = useCallback(() => {
-    if (settleTimer.current) clearTimeout(settleTimer.current);
-    settleTimer.current = setTimeout(() => {
-      settleTimer.current = null;
+    // Its own timer, not a shared one. A single shared timer was a hole: two
+    // overlapping departures both scheduled a decrement, the second cancelled
+    // the first, and the count never came back to zero — so the vault stopped
+    // locking for the rest of the session. Reported as the app being stuck
+    // open, still in the chat after the screen had been off and on again.
+    setTimeout(() => {
       awayOnPurpose.current = Math.max(0, awayOnPurpose.current - 1);
-    }, 1500);
+    }, SETTLE_MS);
   }, []);
 
   /** Armed by the attach sheet, read when the picked photo comes back. A ref
@@ -378,6 +434,10 @@ export default function App() {
       foreground.current = s === 'active';
       if (s === 'active') {
         clearDot();
+        if (deadMansTimer.current) {
+          clearTimeout(deadMansTimer.current);
+          deadMansTimer.current = null;
+        }
         return;
       }
       if (s !== 'background' || !unlocked || !settings.panicOnBackground) return;
@@ -399,7 +459,19 @@ export default function App() {
       // Anything the user deliberately left for, and will be returned from, sets
       // this first. Everything else — the home button, the recents switcher, a
       // call arriving — still locks.
-      if (awayOnPurpose.current > 0) return;
+      if (awayOnPurpose.current > 0) {
+        // Waiting on a camera or a picker — but only for as long as one of
+        // those could plausibly take. If we are still off screen after that,
+        // something has gone wrong in our own bookkeeping, and an unlocked
+        // vault on a phone somebody else is holding is the worst way to find
+        // out. Lock it and let them type the PIN again.
+        if (deadMansTimer.current) clearTimeout(deadMansTimer.current);
+        deadMansTimer.current = setTimeout(() => {
+          deadMansTimer.current = null;
+          if (!foreground.current && !callRef.current) lock();
+        }, AWAY_LIMIT_MS);
+        return;
+      }
       lock();
     });
     return () => sub.remove();
@@ -1227,8 +1299,21 @@ export default function App() {
    * video and nothing said. Asking first also means the tracks exist before the
    * offer goes out, so there is one negotiation instead of two.
    */
+  /** Ring, accept, decline, hang up — down the channel if there is one, and
+   *  through the relay's live path if there is not. Calls used to need the
+   *  direct channel to already be open, which meant the buttons sat greyed out
+   *  while both people were plainly in the app. */
+  const sendCall = useCallback((
+    action: 'ring' | 'accept' | 'decline' | 'hangup',
+    callKind?: CallKind,
+  ) => {
+    if (peerRef.current?.send({ k: 'call', action, callKind })) return;
+    const wire = wrap({ k: 'call', action, callKind });
+    if (wire) sigRef.current?.live(wire);
+  }, [wrap]);
+
   const startCall = async (kind: CallKind) => {
-    if (!connected) return;
+    if (!peerPresent) return;
     try {
       // The permission dialog takes the app off screen; that must not lock it.
       leaveOnPurpose();
@@ -1249,12 +1334,12 @@ export default function App() {
     setCall({ kind, state: 'outgoing' });
     setMuted(false);
     setCameraOff(false);
-    peerRef.current?.send({ k: 'call', action: 'ring', callKind: kind });
+    sendCall('ring', kind);
     setScreen('call');
   };
 
   const declineCall = () => {
-    peerRef.current?.send({ k: 'call', action: 'decline' });
+    sendCall('decline');
     peerRef.current?.closeMedia();
     setCall(null);
     setScreen('chat');
@@ -1270,12 +1355,12 @@ export default function App() {
       declineCall();
       return;
     }
-    peerRef.current?.send({ k: 'call', action: 'accept', callKind: c.kind });
+    sendCall('accept', c.kind);
     setCall({ ...c, state: 'active' });
   };
 
   const hangUp = () => {
-    peerRef.current?.send({ k: 'call', action: 'hangup' });
+    sendCall('hangup');
     peerRef.current?.closeMedia();
     setCall(null);
     setScreen('chat');
@@ -1446,7 +1531,16 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <View style={[styles.root, { backgroundColor: unlocked ? T.vaultBg : T.paper }]}>
+      {/* Every touch anywhere restarts the idle clock. Capture, and returning
+          false, so this sees the touch without taking it from whatever was
+          actually being pressed. */}
+      <View
+        style={[styles.root, { backgroundColor: unlocked ? T.vaultBg : T.paper }]}
+        onStartShouldSetResponderCapture={() => {
+          if (unlocked) nudgeIdle();
+          return false;
+        }}
+      >
         {body}
       </View>
     </SafeAreaProvider>
