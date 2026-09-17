@@ -187,14 +187,6 @@ export default function Chat({
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [viewing, setViewing] = useState<Msg | null>(null);
-  /**
-   * The ••• menu.
-   *
-   * Clearing the conversation used to be a long press on this button and
-   * nothing else — a gesture nobody would ever find, for the one thing people
-   * reach for most when a chat has got long. It is a plain menu item now.
-   */
-  const [menuOpen, setMenuOpen] = useState(false);
   /** Armed in the attach sheet: the next photo is one look only. */
   const [once, setOnce] = useState(false);
 
@@ -423,9 +415,17 @@ export default function Chat({
         </View>
       ) : (
         <View style={s.bar}>
-          <TouchableOpacity onPress={onLock} hitSlop={12}>
-            <Text style={s.lock}>Close</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <TouchableOpacity onPress={onLock} hitSlop={12}>
+              <Text style={s.lock}>Close</Text>
+            </TouchableOpacity>
+            {/* Emptying the chat is the thing people reach for most once it has
+                got long, so it sits in the open next to Close rather than
+                folded away behind a menu. */}
+            <TouchableOpacity onPress={confirmClear} hitSlop={12}>
+              <Text style={s.bin}>🗑</Text>
+            </TouchableOpacity>
+          </View>
 
           <View style={s.statusCenter}>
             <View style={[s.dot, { backgroundColor: dot }]} />
@@ -444,7 +444,7 @@ export default function Chat({
             <TouchableOpacity onPress={() => onCall('video')} disabled={!peerPresent} hitSlop={8}>
               <Text style={[s.icon, !peerPresent && s.iconOff]}>Video</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={8}>
+            <TouchableOpacity onPress={onSettings} hitSlop={8}>
               <Text style={s.icon}>•••</Text>
             </TouchableOpacity>
           </View>
@@ -760,38 +760,6 @@ export default function Chat({
         </View>
       </Modal>
 
-      {/* ---- the ••• menu ---- */}
-      <Modal
-        visible={menuOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setMenuOpen(false)}
-      >
-        <TouchableOpacity style={s.sheetBg} activeOpacity={1} onPress={() => setMenuOpen(false)}>
-          <View style={s.sheet}>
-            <TouchableOpacity
-              style={s.sheetItem}
-              onPress={() => { setMenuOpen(false); confirmClear(); }}
-            >
-              <Text style={[s.sheetItemText, { color: T.danger }]}>Clear this chat</Text>
-              <Text style={s.sheetItemSub}>
-                Empties the conversation. You choose whether it goes from their phone too.
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={s.sheetItem}
-              onPress={() => { setMenuOpen(false); onSettings(); }}
-            >
-              <Text style={s.sheetItemText}>Settings</Text>
-              <Text style={s.sheetItemSub}>
-                Disappearing messages, read receipts, the pairing code.
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
       {/* ---- attachment sheet ---- */}
       <Modal
         visible={attachOpen}
@@ -889,9 +857,6 @@ const s = StyleSheet.create({
   onceTick: { color: '#fff', fontSize: 14, fontWeight: '700' },
   onceTitle: { color: T.vaultInk, fontSize: 15, fontWeight: '600' },
   onceSub: { color: T.vaultInkSoft, fontSize: 12, marginTop: 2, lineHeight: 17 },
-  sheetItemSub: {
-    color: T.vaultInkSoft, fontSize: 12.5, marginTop: 3, lineHeight: 17,
-  },
   onceNote: {
     color: 'rgba(255,255,255,0.75)', fontSize: 11.5,
     paddingHorizontal: 14, paddingTop: 6,
@@ -906,6 +871,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: T.vaultLine,
   },
+  bin: { fontSize: 17, color: T.vaultInkSoft },
   lock: { color: T.vaultInkSoft, fontSize: 15 },
   selCount: { color: T.vaultInk, fontSize: 15, fontWeight: '600' },
   statusCenter: {
