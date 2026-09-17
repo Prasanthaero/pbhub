@@ -51,24 +51,33 @@ server-side record that either person exists. Phone-number pairing was built at
 one point and deliberately removed — a directory of who talks to whom is exactly
 the record this app exists not to create.
 
-Instead there is **one shared secret**, 8 random bytes from the system CSPRNG,
+Instead there is **one shared secret**, 16 random bytes from the system CSPRNG,
 created on one phone and carried to the other:
 
 - **QR code** — screen to camera, touches no network.
-- **20 digits** — the same 8 bytes, two at a time as five digits
-  (`20112 44368 63978 00002`). A group above 65535 cannot have come from this
+- **40 digits** — the same 16 bytes, two at a time as five digits
+  (`61213 11529 13390 51689 63746 25802 23579 58071`). A group above 65535 cannot have come from this
   app, which catches most single-digit typos at the input rather than an hour
   later.
-- Older builds showed 8 words from a 256-word list. Still accepted on input so
-  nobody who wrote theirs down is locked out; never shown any more.
+- Older, half-length codes are refused with the reason — accepting one would
+  build a vault the other phone can never meet, and the only symptom would be
+  "waiting for partner" forever.
 
-From that secret, HKDF derives:
+From that secret, labelled HKDF derives one key per job:
 
-- a **room id** — the only thing the relay sees
-- a **message key** — what everything is encrypted with
+| Label | Key | Used for |
+|---|---|---|
+| `pbhub/room/v3` | room id | the only thing the relay sees |
+| `pbhub/message/v3` | message key | chat envelopes, media, the mailbox |
+| `pbhub/signal/v3` | signalling key | SDP and ICE, which pass through the relay |
 
-Both phones derive the same three values independently. Nothing about the
-pairing is ever transmitted.
+A fourth key, for everything this phone writes to its own disk, comes from a
+**store root** that is generated per device and never shared. So the partner
+cannot decrypt this phone's files, and setting the two phones up again does not
+make this phone's saved history unreadable.
+
+Both phones derive the shared three independently. Nothing about the pairing is
+ever transmitted.
 
 ## The two-secret design
 
@@ -80,15 +89,20 @@ This trips people up, so plainly:
   never leaves the device, and the two phones' PINs do not have to match.
 
 The PIN is stretched with PBKDF2-SHA256 (**12,000 rounds**, was 40,000 — the
-count is recorded in the blob and old vaults are re-sealed transparently on
-first unlock, so nobody re-pairs). The stretched key encrypts the pairing secret
-with XChaCha20-Poly1305. That ciphertext is the only thing on disk. There is no
-password hash anywhere.
+count is recorded in the blob). The stretched key encrypts the pairing secret
+and the store root with XChaCha20-Poly1305. That ciphertext is the only thing on
+disk. There is no password hash anywhere.
 
-**The known weakness:** the pairing secret is **64 bits**. That is the real
-cryptographic floor of the whole app, and it is the one thing worth fixing —
-raising it to 16 bytes / 128 bits costs nothing now that pairing is a QR code
-and nobody types the secret by hand. Offered, not yet done.
+Vault formats: **v3** is the above. **v2** — one 8-byte secret and one key doing
+every job — is still opened and never created, so an install from before this
+keeps working until the pair chooses to set up again.
+
+**Was the known weakness:** the pairing secret used to be 64 bits. It is now
+**16 bytes, 128 bits**. Not 256, because the secret has to stay carryable by
+hand when a camera will not cooperate and 32 bytes is eighty digits to type —
+and 128 bits is already past any computation that exists. Vaults made before
+this keep working on the old construction; a pair that wants the new one sets
+the two phones up again, which takes a QR scan.
 
 Second known weakness: the KDF salt is a **constant**, because two phones that
 have never met must derive the same room from the secret alone. That removes the
@@ -142,6 +156,13 @@ calls fail in practice.
   A correct PIN clears the count and the wait.
 - **A quiet status-bar dot** when something arrives while the app is alive in the
   background. No sender, no preview, no sound.
+- **A protocol version on every payload.** An unknown version is dropped, not
+  guessed at, and every decrypted envelope is checked against the shape its kind
+  requires before anything acts on it.
+- **Replay protection that survives a restart.** The ids this phone has accepted
+  are kept, sealed, on disk. A sealed message is valid forever and carries no
+  counter, so without this a captured one could be handed back after a restart
+  and would look new.
 - **PB** — a small drawn character (all Views, no image asset) who guards the
   door and lives in the chat. He reacts to wrong PINs, can be poked, opens an
   emoji tray on a long press (tap to send one, hold to put that mood on him),

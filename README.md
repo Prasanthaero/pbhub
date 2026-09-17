@@ -43,9 +43,9 @@ Do this once, together, on both phones.
    secret never touches a network.
 
    If a camera will not cooperate, **"Or use a number instead"** gives you the
-   same secret as twenty digits:
+   same secret as forty digits:
 
-   > 20112 44368 63978 00002
+   > 61213 11529 13390 51689 63746 25802 23579 58071
 
    Type those into the other phone. This happens **once** and is not what you
    type to get in — you can forget it afterwards. (If you lose it, it is in
@@ -223,11 +223,11 @@ a dictionary once and try it against every user of this app, instead of paying
 that cost per person.
 
 **The entire defence is the strength of the pairing secret**, which is why you
-never choose it. It is eight bytes straight from the system random generator —
-64 bits, with no human choice anywhere in it — and it reaches the other phone as
-a QR code or as the twenty digits that spell those same bytes out:
+never choose it. It is sixteen bytes straight from the system random generator —
+128 bits, with no human choice anywhere in it — and it reaches the other phone as
+a QR code or as the forty digits that spell those same bytes out:
 
-> 20112 44368 63978 00002
+> 61213 11529 13390 51689 63746 25802 23579 58071
 
 Nothing about that is guessable or precomputable. `iloveyou2` would be, with or
 without a salt, which is why there is no box anywhere in this app that lets you

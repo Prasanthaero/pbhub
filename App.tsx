@@ -18,6 +18,7 @@ import { loadNotes, saveNotes, newNote, type Note } from './src/store/notes';
 import {
   mkMsg, newId, dropExpired, place, type Msg, type MediaKind,
 } from './src/store/messages';
+import { SeenIds, loadSeen, saveSeen, clearSeen } from './src/store/seen';
 import { loadHistory, saveHistory, clearHistory } from './src/store/history';
 import { loadOutbox, saveOutbox, clearOutbox, type Pending } from './src/store/outbox';
 import {
@@ -30,7 +31,9 @@ import {
 import { Signaling, type Role } from './src/net/signaling';
 import { Peer, type CallKind } from './src/net/peer';
 import { available as webrtcAvailable } from './src/net/webrtc';
-import { MAX_OFFLINE_MEDIA_BYTES, type Envelope } from './src/net/transport';
+import {
+  MAX_OFFLINE_MEDIA_BYTES, packEnvelope, parseEnvelope, type Envelope,
+} from './src/net/transport';
 import { prepareNotifications, showDot, clearDot } from './src/net/notify';
 import { pickPhoto, pickVideo, readRecording, TooLarge } from './src/media/pick';
 import {
@@ -148,8 +151,37 @@ export default function App() {
   const peerRef = useRef<Peer | null>(null);
   const roleRef = useRef<Role>('a');
   const outboxRef = useRef<Pending[]>([]);
-  /** Ids already shown, so a message that arrived twice appears once. */
-  const seenRef = useRef<Set<string>>(new Set());
+  /**
+   * Ids already accepted, so a message that arrives twice appears once — and,
+   * because this is written down and reloaded, so does one handed back after a
+   * restart. See store/seen.
+   */
+  const seenRef = useRef<SeenIds>(new SeenIds());
+  /** Pending write of the above, coalesced. */
+  const seenSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Accept an id once.
+   *
+   * Returns false if this phone has already had it, which is the whole check:
+   * a duplicate from a lost acknowledgement and a deliberate replay look
+   * identical from here, and both should be ignored.
+   *
+   * The write is delayed and coalesced. A burst of arriving media chunks would
+   * otherwise mean a burst of encrypt-and-write, and the list only has to be on
+   * disk before the app dies, not before the next message.
+   */
+  const rememberSeen = useCallback((id: string): boolean => {
+    if (!seenRef.current.add(id)) return false;
+    if (!seenSaveRef.current) {
+      seenSaveRef.current = setTimeout(() => {
+        seenSaveRef.current = null;
+        const keys = keysRef.current;
+        if (keys) saveSeen(keys.storeKey, seenRef.current.ids).catch(() => {});
+      }, 2000);
+    }
+    return true;
+  }, []);
 
   const [call, setCallState] = useState<CallInfo | null>(null);
   const callRef = useRef<CallInfo | null>(null);
@@ -241,14 +273,14 @@ export default function App() {
    */
   const wrap = useCallback((e: Envelope): string | null => {
     const keys = keysRef.current;
-    return keys ? seal(keys.msgKey, JSON.stringify(e)) : null;
+    return keys ? seal(keys.msgKey, packEnvelope(e)) : null;
   }, []);
 
   const unwrap = useCallback((wire: string): Envelope | null => {
     const keys = keysRef.current;
     if (!keys) return null;
     try {
-      return JSON.parse(unseal(keys.msgKey, wire)) as Envelope;
+      return parseEnvelope(unseal(keys.msgKey, wire));
     } catch {
       return null;
     }
@@ -290,13 +322,13 @@ export default function App() {
   const persistHistory = useCallback((msgs: Msg[]) => {
     const keys = keysRef.current;
     if (!keys || !settingsRef.current.keepHistory) return;
-    saveHistory(keys.msgKey, msgs).catch(() => {});
+    saveHistory(keys.storeKey, msgs).catch(() => {});
   }, []);
 
   const persistOutbox = useCallback(() => {
     const keys = keysRef.current;
     if (!keys) return;
-    saveOutbox(keys.msgKey, outboxRef.current).catch(() => {});
+    saveOutbox(keys.storeKey, outboxRef.current).catch(() => {});
   }, []);
 
   /**
@@ -361,11 +393,19 @@ export default function App() {
     peerRef.current = null;
     sigRef.current?.close();
     sigRef.current = null;
+    // Every piece of key material, not just the one that used to exist.
     wipe(keysRef.current?.msgKey);
+    wipe(keysRef.current?.sigKey);
+    wipe(keysRef.current?.storeKey);
+    wipe(keysRef.current?.storeRoot);
     wipe(keysRef.current?.pairing);
     keysRef.current = null;
     outboxRef.current = [];
-    seenRef.current = new Set();
+    if (seenSaveRef.current) {
+      clearTimeout(seenSaveRef.current);
+      seenSaveRef.current = null;
+    }
+    seenRef.current = new SeenIds();
     reportedSeen.current = new Set();
     setMessages([]);
     setLocalStream(null);
@@ -547,8 +587,8 @@ export default function App() {
   const applyEnvelope = useCallback((e: Envelope, at = Date.now()) => {
     switch (e.k) {
       case 'msg': {
-        if (seenRef.current.has(e.id)) return; // arrived twice; show it once
-        seenRef.current.add(e.id);
+        // Arrived twice, or handed back later; either way it is not new.
+        if (!rememberSeen(e.id)) return;
         setMessages((m) => {
           const next = place(m, {
             id: e.id, kind: 'in' as const, body: e.body, at: e.at || at, expiresAt: e.exp,
@@ -586,8 +626,7 @@ export default function App() {
         return;
       }
       case 'media-whole': {
-        if (seenRef.current.has(e.id)) return;
-        seenRef.current.add(e.id);
+        if (!rememberSeen(e.id)) return;
         setMessages((m) => place(m, {
           id: e.id,
           kind: 'in',
@@ -731,7 +770,7 @@ export default function App() {
           const confirmed = { ...settingsRef.current, pairedOnce: true };
           settingsRef.current = confirmed;
           setSettings(confirmed);
-          if (keysRef.current) writeSettings(keysRef.current.msgKey, confirmed).catch(() => {});
+          if (keysRef.current) writeSettings(keysRef.current.storeKey, confirmed).catch(() => {});
         }
 
         flushOutbox();
@@ -740,8 +779,7 @@ export default function App() {
       },
       onEnvelope: (e) => applyEnvelope(e),
       onMedia: (id, kind, uri, mime, bytes, at, duration, exp, once) => {
-        if (seenRef.current.has(id)) return;
-        seenRef.current.add(id);
+        if (!rememberSeen(id)) return;
         setMessages((m) => place(m.filter((x) => x.id !== id), {
           id, kind: 'in', body: '', at, expiresAt: exp, viewOnce: once,
           media: { kind, uri, mime, bytes, duration },
@@ -771,7 +809,7 @@ export default function App() {
   const connect = useCallback((keys: VaultKeys, cfg: VaultSettings) => {
     peekRef.current?.close();
     peekRef.current = null;
-    const sig = new Signaling(cfg.relayUrl, keys.roomId, keys.msgKey, {
+    const sig = new Signaling(cfg.relayUrl, keys.roomId, keys.sigKey, {
       onReady: (role) => {
         roleRef.current = role;
         setRelayUp(true);
@@ -839,17 +877,20 @@ export default function App() {
 
   const enterVault = useCallback(async (keys: VaultKeys) => {
     keysRef.current = keys;
-    const cfg = await readSettings(keys.msgKey);
+    const cfg = await readSettings(keys.storeKey);
     setSettings(cfg);
     settingsRef.current = cfg;
 
     const [history, outbox, mine] = await Promise.all([
-      cfg.keepHistory ? loadHistory(keys.msgKey) : Promise.resolve([] as Msg[]),
-      loadOutbox(keys.msgKey),
-      loadStatuses(keys.msgKey),
+      cfg.keepHistory ? loadHistory(keys.storeKey) : Promise.resolve([] as Msg[]),
+      loadOutbox(keys.storeKey),
+      loadStatuses(keys.storeKey),
     ]);
 
     const live = dropExpired(history);
+    // What this phone accepted before, plus whatever the kept history proves it
+    // has already shown.
+    seenRef.current = new SeenIds(await loadSeen(keys.storeKey));
     live.forEach((m) => seenRef.current.add(m.id));
     outboxRef.current = outbox;
     setMessages(live);
@@ -881,7 +922,7 @@ export default function App() {
     // unreadable. Not awaited — the vault is open either way, and a write that
     // fails only means the next unlock is slow again.
     if (needsRestretch(marker)) {
-      const { blob } = createVault(candidate, keys.pairing);
+      const { blob } = createVault(candidate, keys.pairing, keys.storeRoot);
       writeMarker(blob).catch(() => {});
     }
 
@@ -889,11 +930,21 @@ export default function App() {
     return true;
   }, [enterVault]);
 
+  /**
+   * Set this phone up, or set it up again with a new partner code.
+   *
+   * The second case is the interesting one. Setting up again means a new
+   * pairing secret, so everything shared changes — but this phone's own files
+   * are keyed to a store root that has nothing to do with the pairing, and
+   * carrying that root across means the saved history survives a re-pair.
+   * Getting it requires the old PIN, so it only happens where the person
+   * proved they own the vault they are replacing.
+   */
   const setupVault = useCallback(
     async (pin: string, secret: Uint8Array, relayUrl: string) => {
-      const { blob, keys } = createVault(pin, secret);
+      const { blob, keys } = createVault(pin, secret, keysRef.current?.storeRoot);
       await writeMarker(blob);
-      await writeSettings(keys.msgKey, defaultSettings(relayUrl.trim()));
+      await writeSettings(keys.storeKey, defaultSettings(relayUrl.trim()));
       setHasVault(true);
       await enterVault(keys);
     },
@@ -1035,7 +1086,7 @@ export default function App() {
   const commitStatuses = useCallback(async (items: StatusItem[]) => {
     const keys = keysRef.current;
     if (!keys) return;
-    const live = await writeStatuses(keys.msgKey, items);
+    const live = await writeStatuses(keys.storeKey, items);
     setMyStatuses(live);
     myStatusesRef.current = live;
     publishStatuses(live);
@@ -1065,7 +1116,7 @@ export default function App() {
     };
 
     if (media) {
-      item.mediaId = await writeStatusMedia(keys.msgKey, media.b64);
+      item.mediaId = await writeStatusMedia(keys.storeKey, media.b64);
       item.mime = media.mime;
       item.bytes = media.bytes;
       item.duration = media.duration;
@@ -1084,7 +1135,7 @@ export default function App() {
     const keys = keysRef.current;
     const item = myStatusesRef.current.find((s) => s.id === id);
     if (!keys || !item?.mediaId || item.uri) return;
-    const b64 = await readStatusMedia(keys.msgKey, item.mediaId);
+    const b64 = await readStatusMedia(keys.storeKey, item.mediaId);
     if (!b64) return;
     const uri = `data:${item.mime ?? 'image/jpeg'};base64,${b64}`;
     setMyStatuses((list) => list.map((s) => (s.id === id ? { ...s, uri } : s)));
@@ -1103,7 +1154,7 @@ export default function App() {
     const keys = keysRef.current;
     const peer = peerRef.current;
     if (!keys || !peer?.isOpen || !item.mediaId) return;
-    const b64 = item.uri?.split(',')[1] ?? (await readStatusMedia(keys.msgKey, item.mediaId));
+    const b64 = item.uri?.split(',')[1] ?? (await readStatusMedia(keys.storeKey, item.mediaId));
     if (!b64) return;
     await peer.sendMedia(
       newId(),
@@ -1486,13 +1537,13 @@ export default function App() {
 
             setSettings(next);
             settingsRef.current = next;
-            if (keys) await writeSettings(keys.msgKey, next);
+            if (keys) await writeSettings(keys.storeKey, next);
 
             // Turning history off takes the existing log with it — otherwise
             // the switch says one thing and the disk says another.
             if (wasKeeping && !next.keepHistory) await clearHistory();
             if (!wasKeeping && next.keepHistory && keys) {
-              await saveHistory(keys.msgKey, messagesRef.current);
+              await saveHistory(keys.storeKey, messagesRef.current);
             }
 
             // Reconnect so a changed relay or ICE list takes effect now.
@@ -1510,6 +1561,7 @@ export default function App() {
             await clearHistory();
             await clearOutbox();
             await clearStatuses();
+            await clearSeen();
             await wipeStatusMedia();
             setHasVault(false);
             lock();

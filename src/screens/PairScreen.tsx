@@ -7,7 +7,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import QRCode from 'react-native-qrcode-svg';
 import { T } from '../theme';
 import { wordsToBytes } from '../crypto/wordlist';
-import { bytesToDigits, PAIRING_DIGITS } from '../crypto/pairingNumber';
+import { bytesToDigits, looksOutdated, PAIRING_DIGITS } from '../crypto/pairingNumber';
 import { encodePairing, decodePairing } from '../crypto/pairingCode';
 
 /**
@@ -62,7 +62,13 @@ export default function PairScreen({ phrase, onScanned, onBack }: Props) {
     if (handled) return;
     const words = decodePairing(String(data));
     if (!words) {
-      setErr('That is not a pairing code from this app.');
+      // Telling an old code apart from a stranger's QR matters: one of them is
+      // fixed by updating the other phone, and the other never will be.
+      setErr(
+        looksOutdated(String(data).replace(/^[a-z0-9]+:/i, '').replace(/-/g, ' '))
+          ? 'That code is from an older version. Update the other phone and make a new one.'
+          : 'That is not a pairing code from this app.',
+      );
       return;
     }
     setHandled(true);

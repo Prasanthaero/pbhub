@@ -78,8 +78,21 @@ export const phraseBits = (words = WORDS_IN_PHRASE) => words * 8;
 // the mapping is lossless in both directions.
 // ---------------------------------------------------------------------------
 
-/** Bytes in a pairing secret. 8 bytes = 64 bits = 8 words to type once. */
-export const PAIRING_BYTES = 8;
+/**
+ * Bytes in a pairing secret. 16 bytes = 128 bits.
+ *
+ * It was 8, and 64 bits was the weakest thing in the app: the one number an
+ * attacker with the relay's traffic would go after, because everything else is
+ * derived from it.
+ *
+ * Not 32. A pairing secret has to be carryable by hand when a camera will not
+ * cooperate, and 32 bytes is eighty digits to type — long enough that people
+ * would give up and photograph it instead, which is worse than the thing this
+ * was meant to fix. 128 bits is already past any amount of computation that
+ * exists or is coming; the step from 128 to 256 buys nothing real here and
+ * costs the only fallback that works when the QR code does not.
+ */
+export const PAIRING_BYTES = 16;
 
 const INDEX: Record<string, number> = {};
 WORDS.forEach((word, i) => { INDEX[word] = i; });

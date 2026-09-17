@@ -17,6 +17,7 @@
  * later.
  */
 import { PAIRING_BYTES, wordsToBytes } from './wordlist';
+export { PAIRING_BYTES };
 
 const GROUP_BYTES = 2;
 const GROUP_DIGITS = 5;
@@ -63,11 +64,25 @@ export function digitsToBytes(text: string): Uint8Array | null {
 /**
  * Whatever the other phone gave you.
  *
- * Numbers are what this app shows now. Words are still accepted because an
- * older build showed those, and somebody may have written theirs down — a
- * couple who copied their phrase onto paper a month ago should not find that
- * the app has stopped recognising it.
+ * Numbers are what this app shows. Words are still read because an older build
+ * showed those — but only at the current length; see `looksOutdated`.
  */
 export function parsePairing(text: string): Uint8Array | null {
   return digitsToBytes(text) ?? wordsToBytes(text);
+}
+
+/**
+ * A code from before the secret was made longer.
+ *
+ * Worth telling apart from a typo. Those codes are exactly half the length of a
+ * current one, and accepting one would be worse than refusing it: this phone
+ * would build a vault the other phone cannot meet, and the only symptom would
+ * be "waiting for partner" forever. Refusing it with the real reason — the
+ * other phone needs the new app — costs one sentence and saves an evening.
+ */
+export function looksOutdated(text: string): boolean {
+  const digits = String(text ?? '').replace(/\D/g, '');
+  if (digits.length === PAIRING_DIGITS / 2) return true;
+  const words = String(text ?? '').trim().split(/\s+/).filter(Boolean);
+  return words.length === PAIRING_BYTES / 2 && /^[a-z\s]+$/i.test(String(text ?? '').trim());
 }

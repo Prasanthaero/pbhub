@@ -1,5 +1,5 @@
 /**
- * Everything that travels between the two phones, and how it gets there.
+ * Moving what envelope.ts describes.
  *
  * Two roads, one format. A payload is sealed once, then either goes down the
  * WebRTC data channel (direct, when the partner is here) or into the relay's
@@ -12,10 +12,13 @@
  * worth caring about, and let progress be shown while a photo arrives.
  */
 import type { MediaKind } from '../store/messages';
-import type { StatusSummary } from '../store/status';
+import { CHUNK_BYTES } from './envelope';
 
-/** Comfortably under the smallest data-channel message limit in the wild. */
-export const CHUNK_BYTES = 16 * 1024;
+export {
+  PROTOCOL_VERSION, CHUNK_BYTES, MAX_MEDIA_BYTES, MAX_OFFLINE_MEDIA_BYTES,
+  packEnvelope, parseEnvelope,
+} from './envelope';
+export type { Envelope } from './envelope';
 
 /**
  * Pause sending when this much is already queued in the channel, and resume
@@ -24,90 +27,6 @@ export const CHUNK_BYTES = 16 * 1024;
  */
 export const BUFFER_HIGH = 512 * 1024;
 export const BUFFER_LOW = 128 * 1024;
-
-/** Refuse anything that would take absurdly long over a phone connection. */
-export const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
-
-/**
- * The most that can be left waiting for an absent partner.
- *
- * Smaller than the live limit on purpose: this has to sit encrypted in the
- * sender's outbox and in the relay's memory until it is collected, rather than
- * streaming past in a few seconds. Photos are shrunk well under this; a long
- * video is not, and is told to wait for both phones.
- */
-export const MAX_OFFLINE_MEDIA_BYTES = 4 * 1024 * 1024;
-
-export type Envelope =
-  | {
-      k: 'msg';
-      id: string;
-      body: string;
-      at: number;
-      /** Absolute ms when both phones drop it. */
-      exp?: number;
-    }
-  | { k: 'ack'; id: string }
-  /** Someone is writing. Never held for later — see Signaling.live. */
-  | { k: 'typing'; on: boolean }
-  /** "I have these on screen." Sent only when the chat is actually open, and
-   *  only if read receipts are switched on. */
-  | { k: 'read'; ids: string[] }
-  | { k: 'call'; action: 'ring' | 'accept' | 'decline' | 'hangup'; callKind?: 'audio' | 'video' }
-  /**
-   * The list of statuses, without any of the bytes.
-   *
-   * Media is fetched on demand rather than pushed: several clips would be a
-   * long, silent transfer on connect, most of which the viewer never opens.
-   */
-  | { k: 'status-list'; items: StatusSummary[] }
-  /** "Send me the media for this one" — sent when a viewer actually opens it. */
-  | { k: 'status-want'; id: string }
-  | { k: 'status-clear' }
-  /** Take these back off the other phone as well as this one. */
-  | { k: 'delete'; ids: string[] }
-  | {
-      k: 'media-start';
-      id: string;
-      kind: MediaKind;
-      mime: string;
-      bytes: number;
-      chunks: number;
-      duration?: number;
-      at: number;
-      /** Present when this transfer is a status being fetched, not a message.
-       *  Without it the picture would land in the conversation. */
-      statusId?: string;
-      /** Both phones drop it at this instant. */
-      exp?: number;
-      /** A photo the other side may look at exactly once. */
-      once?: boolean;
-    }
-  | { k: 'media-chunk'; id: string; seq: number; b64: string }
-  | { k: 'media-end'; id: string }
-  | { k: 'media-abort'; id: string; reason: string }
-  /**
-   * A whole file in one envelope, for when the partner is not here.
-   *
-   * The chunked path above exists because a data channel will not carry a large
-   * message. The relay's mailbox will, so mail takes the simple road: seal it
-   * once, hand it over, and let it wait. Capped, because it has to sit in the
-   * sender's outbox and in the relay's memory until it is collected.
-   */
-  | {
-      k: 'media-whole';
-      id: string;
-      kind: MediaKind;
-      mime: string;
-      bytes: number;
-      duration?: number;
-      b64: string;
-      at: number;
-      /** Both phones drop it at this instant. */
-      exp?: number;
-      /** A photo the other side may look at exactly once. */
-      once?: boolean;
-    };
 
 /** Reassembles a media transfer as its chunks arrive. */
 export class MediaAssembler {

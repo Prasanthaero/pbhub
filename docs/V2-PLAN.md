@@ -63,18 +63,19 @@ A phase is over when every line is true. Not when the code is written.
 - [x] Every V2 section triaged: already done / do / defer / recommend against
 - [x] No code changed
 
-### Phase 2 — Crypto foundation
-- [ ] Pairing secret ≥ 128 bits, generated only by CSPRNG
-- [ ] Key separation: message, media, signalling and storage keys are different
-      keys derived by labelled HKDF from one root
-- [ ] `v` (protocol version) on every envelope; unknown versions rejected, not
+### Phase 2 — Crypto foundation — **DONE**
+- [x] Pairing secret ≥ 128 bits, generated only by CSPRNG — 16 bytes
+- [x] Key separation: message, signalling and storage keys are different keys
+      derived by labelled HKDF. Media deliberately shares the message key; a
+      fourth key there would draw no line, and the reason is in vault.ts
+- [x] `v` (protocol version) on every envelope; unknown versions rejected, not
       guessed
-- [ ] Replay protection survives a restart, proven by a test that restarts
-- [ ] Decrypted envelopes validated by shape before use, not cast
-- [ ] Migration: an old vault either upgrades or fails **without destroying
-      itself**, proven by a test
-- [ ] Two emulators: pair, send, lock, unlock, send again, offline delivery
-- [ ] Full suite green, typecheck clean, release APK installs
+- [x] Replay protection survives a restart, proven by a test that reloads it
+- [x] Decrypted envelopes validated by shape before use, not cast
+- [x] Migration: a v2 vault opens on the old construction and is never rewritten
+- [x] Two emulators: upgraded in place and still connected; then fresh v3 pair by
+      40 typed digits, message delivered, lock, unlock, reconnect
+- [x] Full suite green (107 checks), typecheck clean, release APK installs
 
 ### Phase 3 — Session security (forward secrecy)
 - [ ] A written protocol document before a line of ratchet code

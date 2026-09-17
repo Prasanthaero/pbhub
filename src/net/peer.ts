@@ -24,7 +24,8 @@ import type { Role } from './signaling';
 import { seal, unseal, toHex } from '../crypto/vault';
 import { randomBytes } from '../crypto/random';
 import {
-  BUFFER_HIGH, BUFFER_LOW, chunkBase64, MediaAssembler, type Envelope,
+  BUFFER_HIGH, BUFFER_LOW, chunkBase64, MediaAssembler, packEnvelope, parseEnvelope,
+  type Envelope,
 } from './transport';
 import type { MediaKind } from '../store/messages';
 
@@ -154,13 +155,10 @@ export class Peer {
     ch.addEventListener('open', () => this.ev.onChannelOpen(true));
     ch.addEventListener('close', () => this.ev.onChannelOpen(false));
     ch.addEventListener('message', (e: any) => {
-      let payload: Envelope;
-      try {
-        payload = JSON.parse(unseal(this.key, String(e.data)));
-      } catch {
-        return;
-      }
-      this.handleEnvelope(payload);
+      const payload = this.unwrap(String(e.data));
+      // Dropped without a word: a payload that does not decrypt, or does not
+      // parse, or is not a shape this build knows, is not something to act on.
+      if (payload) this.handleEnvelope(payload);
     });
   }
 
@@ -222,14 +220,14 @@ export class Peer {
 
   /** Seal a payload for the wire. Used for both roads out of here. */
   wrap(e: Envelope): string {
-    return seal(this.key, JSON.stringify(e));
+    return seal(this.key, packEnvelope(e));
   }
 
   /** Open a payload that came back the other way — including mail the relay
    *  held, which never touched the data channel. Null if it is not ours. */
   unwrap(wire: string): Envelope | null {
     try {
-      return JSON.parse(unseal(this.key, wire)) as Envelope;
+      return parseEnvelope(unseal(this.key, wire));
     } catch {
       return null;
     }

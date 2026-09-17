@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import {
-  createVault, openVault, seal, unseal, needsRestretch,
+  createVault, createLegacyVault, openVault, seal, unseal, needsRestretch,
 } from '../src/crypto/vault.ts';
 import {
   generatePairingSecret, bytesToWords, wordsToBytes, PAIRING_BYTES,
@@ -192,8 +192,12 @@ for (let i = 0; i < 400; i++) {
 ok(`every secret is exactly ${PAIRING_DIGITS} digits, and reads back byte for byte`);
 
 // The two ends of the range are where an off-by-one in the padding shows up.
-assert.equal(bytesToDigits(new Uint8Array(8)), '00000 00000 00000 00000');
-assert.equal(bytesToDigits(new Uint8Array(8).fill(255)), '65535 65535 65535 65535');
+const groups = PAIRING_BYTES / 2;
+assert.equal(bytesToDigits(new Uint8Array(PAIRING_BYTES)), Array(groups).fill('00000').join(' '));
+assert.equal(
+  bytesToDigits(new Uint8Array(PAIRING_BYTES).fill(255)),
+  Array(groups).fill('65535').join(' '),
+);
 ok('all zeroes and all ones are still the right length');
 
 const digits = bytesToDigits(secret);
@@ -202,7 +206,8 @@ assert.equal(hex(digitsToBytes(digits.replace(/ /g, '-'))), hex(secret));
 assert.equal(hex(digitsToBytes(' ' + digits + '\n')), hex(secret));
 ok('spaces, dashes and stray whitespace between the groups are ignored');
 
-for (const junk of ['', '123', digits + '7', digits.slice(1), '99999 99999 99999 99999', 'hello']) {
+const tooBig = Array(PAIRING_BYTES / 2).fill('99999').join(' ');
+for (const junk of ['', '123', digits + '7', digits.slice(1), tooBig, 'hello']) {
   assert.equal(digitsToBytes(junk), null, `"${junk}" should be rejected`);
 }
 ok('a wrong length, or a group no secret could produce, is refused');
@@ -222,39 +227,28 @@ console.log('');
 console.log('changing the round count');
 
 const made = createVault(PIN, secret);
+assert.equal(made.blob.v, 3);
 assert.equal(typeof made.blob.c, 'number');
 assert.equal(needsRestretch(made.blob), false);
-ok('a vault records the round count it was sealed with');
+ok('a new vault is v3 and records the round count it was sealed with');
 
-// What an older install has on disk: the same blob with nothing to say about
-// rounds, which means the 40,000 that used to be hardcoded.
-const legacy = { ...made.blob };
-delete legacy.c;
-assert.equal(needsRestretch(legacy), true);
-ok('one without it is recognised as needing re-sealing');
+const slow = createVault(PIN, secret, made.keys.storeRoot, 40_000);
+assert.equal(needsRestretch(slow.blob), true);
+const faster = openVault(slow.blob, PIN);
+assert.ok(faster, 'a v3 vault at the old round count must still open');
+assert.equal(hex(faster.pairing), hex(secret));
+assert.equal(faster.roomId, made.keys.roomId);
+ok('one sealed at the old count still opens, on the same room');
 
-// It was actually sealed at the current count, so reading it as a legacy blob
-// must fail rather than quietly return the wrong bytes.
-assert.equal(openVault(legacy, PIN), null);
-ok('and is read at the old count, not the new one');
-
-const older = createVault(PIN, secret, 40_000);
-delete older.blob.c;
-const fromOld = openVault(older.blob, PIN);
-assert.ok(fromOld, 'a vault from before the change no longer opens');
-assert.equal(hex(fromOld.pairing), hex(secret));
-assert.equal(fromOld.roomId, made.keys.roomId);
-ok("a vault from before the change still opens, on the same room");
-
-// The upgrade the app performs after a successful unlock.
-const upgraded = createVault(PIN, fromOld.pairing);
-assert.equal(needsRestretch(upgraded.blob), false);
-const after = openVault(upgraded.blob, PIN);
+const resealed = createVault(PIN, faster.pairing, faster.storeRoot);
+assert.equal(needsRestretch(resealed.blob), false);
+const after = openVault(resealed.blob, PIN);
 assert.equal(hex(after.pairing), hex(secret));
 assert.equal(after.roomId, made.keys.roomId);
-ok('re-sealing keeps the same secret, room and message key — no re-pairing');
+assert.equal(hex(after.storeKey), hex(faster.storeKey));
+ok('re-sealing keeps the secret, the room and this phone’s own store key');
 
-assert.equal(openVault(upgraded.blob, 'wrong'), null);
+assert.equal(openVault(resealed.blob, 'wrong'), null);
 ok('and the new blob still refuses the wrong PIN');
 
 // ---------------------------------------------------------------------------

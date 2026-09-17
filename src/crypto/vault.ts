@@ -3,9 +3,9 @@
  *
  * Two secrets with two different jobs, which is the whole point of this file:
  *
- *   The PAIRING SECRET is 8 random bytes generated once and carried to the
- *   other phone by hand. It produces the room id and the message key. It is
- *   never typed again after setup.
+ *   The PAIRING SECRET is 16 random bytes generated once and carried to the
+ *   other phone by QR code. Four keys come out of it, one per job. It is never
+ *   typed again after setup.
  *
  *   The PIN is what you type into a note to get in. It protects the pairing
  *   secret where it sits on this phone, and nothing else.
@@ -66,13 +66,28 @@ const PBKDF2_ROUNDS = 12_000;
 /** What vaults made before the count was written down used. */
 const LEGACY_ROUNDS = 40_000;
 
+/**
+ * Vault formats.
+ *
+ * v2 — one 8-byte pairing secret, and one key derived from it doing every job:
+ * messages, media, signalling, and everything this phone writes to its own
+ * disk. Still opened, never created. See `deriveV2`.
+ *
+ * v3 — a 16-byte pairing secret, and a second random value that never leaves
+ * this phone. Four keys come out of them, one per job. See `deriveV3`.
+ */
 export type VaultBlob = {
-  v: 2;
+  v: 2 | 3;
   /** Random per device. The PIN never leaves this phone, so nothing forces
    *  two phones to agree on it. */
   salt: string;
   nonce: string;
-  /** The pairing secret, sealed under the PIN. Indistinguishable from noise. */
+  /**
+   * Sealed under the PIN, indistinguishable from noise.
+   *
+   * v2: the pairing secret's raw bytes.
+   * v3: JSON — the pairing secret and this device's store root.
+   */
   ct: string;
   /** Rounds used to stretch the PIN. Absent on older vaults, which all used
    *  LEGACY_ROUNDS — recorded now so the number can change again without
@@ -81,24 +96,58 @@ export type VaultBlob = {
 };
 
 /**
- * Whether this vault was sealed with a different round count than we now use.
+ * Whether this vault can be re-sealed faster after a successful unlock.
  *
- * True means it can be re-sealed after a successful unlock — same pairing
- * secret, same room, same message key, so nothing needs re-pairing and nothing
- * already encrypted becomes unreadable. One slow unlock, then fast.
+ * Only ever true for v3. A v2 vault is deliberately left alone: re-sealing it
+ * would have to keep it v2 — its shared key is what the *other* phone is also
+ * using, and what this phone's stored files are encrypted with — and a
+ * re-seal path that must carefully preserve an old format is exactly the kind
+ * of code that quietly gets it wrong one day. v2 vaults stay slow until the
+ * pair is set up again, which is the thing that actually fixes them.
  */
 export function needsRestretch(blob: VaultBlob): boolean {
-  return (blob.c ?? LEGACY_ROUNDS) !== PBKDF2_ROUNDS;
+  return blob.v === 3 && (blob.c ?? LEGACY_ROUNDS) !== PBKDF2_ROUNDS;
 }
 
 export type VaultKeys = {
   /** Rendezvous id handed to the relay. 128 bits of randomness. */
   roomId: string;
-  /** Symmetric key for every byte that leaves the device. */
+  /**
+   * Content that goes to the other phone: chat envelopes, media, mailbox.
+   *
+   * Media is not given a key of its own. A separate key is worth having where
+   * it draws a line between different parties or different threats, and media
+   * here travels the same channel to the same person under the same session as
+   * the text does. A fifth key would look like more security and add none.
+   */
   msgKey: Uint8Array;
+  /**
+   * Signalling: SDP and ICE candidates, which pass through the relay.
+   *
+   * Separate from msgKey because this is the one kind of payload the relay is
+   * *meant* to route while still being unable to read it. If a mistake is ever
+   * made in the signalling path, it should not hand anyone the key to the
+   * conversation.
+   */
+  sigKey: Uint8Array;
+  /**
+   * Everything this phone writes to its own disk: history, outbox, statuses,
+   * status media, settings.
+   *
+   * On v3 this comes from a random value that exists only on this device, so
+   * the other phone cannot decrypt this phone's files even though the two of
+   * them share a conversation. It also means changing the pairing — setting the
+   * two phones up again — does not make this phone's own stored history
+   * unreadable, because the store root is carried across unchanged.
+   */
+  storeKey: Uint8Array;
   /** The pairing secret itself, kept in RAM while unlocked so Settings can
    *  show it again when the second phone is being set up. Wiped on lock. */
   pairing: Uint8Array;
+  /** Which construction produced these keys. */
+  era: 2 | 3;
+  /** The per-device store root, so a re-pair can keep this phone's files. */
+  storeRoot: Uint8Array;
 };
 
 export const toHex = bytesToHex;
@@ -120,12 +169,43 @@ function stretchPin(pin: string, salt: Uint8Array, rounds = PBKDF2_ROUNDS): Uint
   return out;
 }
 
-/** Room id and message key, from the pairing secret both phones hold. */
-function deriveShared(secret: Uint8Array): VaultKeys {
+/**
+ * The old construction: one key for everything.
+ *
+ * Kept exactly as it was, because two phones that have not been set up again
+ * still have to agree, and because this phone's existing files are sealed with
+ * the key it produces. Never used for a new vault.
+ */
+function deriveV2(secret: Uint8Array): VaultKeys {
+  const one = hkdf(sha256, secret, undefined, utf8('pbhub/message'), 32);
   return {
     roomId: toHex(hkdf(sha256, secret, undefined, utf8('pbhub/room'), 16)),
-    msgKey: hkdf(sha256, secret, undefined, utf8('pbhub/message'), 32),
+    msgKey: one,
+    sigKey: one,
+    storeKey: one,
     pairing: secret,
+    storeRoot: secret,
+    era: 2,
+  };
+}
+
+/**
+ * One key per job.
+ *
+ * The labels are the domain separation: HKDF with different `info` gives keys
+ * that cannot be derived from one another, so a key that leaks through one path
+ * does not open the others. The version is in the label on purpose — a future
+ * v4 must not be able to produce a v3 key by accident.
+ */
+function deriveV3(secret: Uint8Array, storeRoot: Uint8Array): VaultKeys {
+  return {
+    roomId: toHex(hkdf(sha256, secret, undefined, utf8('pbhub/room/v3'), 16)),
+    msgKey: hkdf(sha256, secret, undefined, utf8('pbhub/message/v3'), 32),
+    sigKey: hkdf(sha256, secret, undefined, utf8('pbhub/signal/v3'), 32),
+    storeKey: hkdf(sha256, storeRoot, undefined, utf8('pbhub/store/v3'), 32),
+    pairing: secret,
+    storeRoot,
+    era: 3,
   };
 }
 
@@ -139,15 +219,45 @@ function deriveShared(secret: Uint8Array): VaultKeys {
 export function createVault(
   pin: string,
   secret: Uint8Array,
+  /**
+   * The value this phone's own files are keyed to.
+   *
+   * Passed in when the two phones are being set up again on a phone that
+   * already had a vault: carrying the old root across means a new pairing does
+   * not make this phone's saved history unreadable. Fresh installs get a new
+   * one, which is the common case.
+   */
+  storeRoot: Uint8Array = randomBytes(32),
   /** Only the tests pass this, to build a vault as an older version would. */
   rounds: number = PBKDF2_ROUNDS,
+): { blob: VaultBlob; keys: VaultKeys } {
+  const salt = randomBytes(16);
+  const nonce = randomBytes(24);
+  const body = JSON.stringify({ p: toHex(secret), s: toHex(storeRoot) });
+  const ct = xchacha20poly1305(stretchPin(pin, salt, rounds), nonce).encrypt(utf8(body));
+  return {
+    blob: { v: 3, salt: toHex(salt), nonce: toHex(nonce), ct: toHex(ct), c: rounds },
+    keys: deriveV3(secret, storeRoot),
+  };
+}
+
+/**
+ * Build a v2 vault, exactly as the old code did. Tests only.
+ *
+ * Here rather than in the test file because a test that constructs the old
+ * format by hand stops testing the old format the moment this one changes.
+ */
+export function createLegacyVault(
+  pin: string,
+  secret: Uint8Array,
+  rounds: number = LEGACY_ROUNDS,
 ): { blob: VaultBlob; keys: VaultKeys } {
   const salt = randomBytes(16);
   const nonce = randomBytes(24);
   const ct = xchacha20poly1305(stretchPin(pin, salt, rounds), nonce).encrypt(secret);
   return {
     blob: { v: 2, salt: toHex(salt), nonce: toHex(nonce), ct: toHex(ct), c: rounds },
-    keys: deriveShared(secret),
+    keys: deriveV2(secret),
   };
 }
 
@@ -161,8 +271,16 @@ export function createVault(
 export function openVault(blob: VaultBlob, candidate: string): VaultKeys | null {
   try {
     const key = stretchPin(candidate, fromHex(blob.salt), blob.c ?? LEGACY_ROUNDS);
-    const secret = xchacha20poly1305(key, fromHex(blob.nonce)).decrypt(fromHex(blob.ct));
-    return deriveShared(secret);
+    const opened = xchacha20poly1305(key, fromHex(blob.nonce)).decrypt(fromHex(blob.ct));
+
+    // v2 sealed the secret's raw bytes; v3 seals a small JSON object. The
+    // version decides, not the shape of what came out — guessing at the
+    // contents is how a format migration turns into a silent wrong answer.
+    if (blob.v === 2) return deriveV2(opened);
+
+    const body = JSON.parse(bytesToUtf8(opened)) as { p?: string; s?: string };
+    if (!body?.p || !body?.s) return null;
+    return deriveV3(fromHex(body.p), fromHex(body.s));
   } catch {
     return null;
   }

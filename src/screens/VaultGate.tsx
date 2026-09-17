@@ -10,7 +10,9 @@ import { DEFAULT_RELAY } from '../store/vaultStore';
 import {
   generatePairingSecret, bytesToWords, wordsToBytes,
 } from '../crypto/wordlist';
-import { bytesToDigits, parsePairing, PAIRING_DIGITS } from '../crypto/pairingNumber';
+import {
+  bytesToDigits, parsePairing, looksOutdated, PAIRING_DIGITS,
+} from '../crypto/pairingNumber';
 import PairScreen from './PairScreen';
 import PBBot, { type PBMood } from '../ui/PBBot';
 import {
@@ -176,6 +178,12 @@ export default function VaultGate({ mode, onSetup, onUnlock, onCancel }: Props) 
 
     const secret = wordsToBytes(pairing);
     if (!secret) {
+      if (looksOutdated(typed)) {
+        return setErr(
+          'That code is from an older version of the app. Update the other phone, '
+          + 'make a new code there, and use that one.',
+        );
+      }
       return setErr(
         typed.trim()
           ? 'That number is not right — check it against the other phone.'
